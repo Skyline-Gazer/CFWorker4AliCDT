@@ -1,6 +1,7 @@
 # CFWorker4AliCDT — Project Specification
 
-> Status: **Draft for owner review.** Companion to [project-plan.md](./project-plan.md).
+> Status: **APPROVED by owner (2026-09-20).** Companion to [project-plan.md](./project-plan.md).
+> Amendment: `STOPPED_MODE` defaults to `KeepCharging` (owner decision, §6.4).
 > Normative language: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 > Where this SPEC and the PLAN disagree, the SPEC governs behaviour.
 
@@ -34,7 +35,7 @@ missing secret **fails** rather than shipping a Worker that cannot authenticate.
 | `CDT_ENDPOINT` | No | `cdt.aliyuncs.com` | CDT API host. Configuration, not a constant (risk R2). |
 | `BUSINESS_REGION_ID` | No | unset | If set, CDT `BusinessRegionId`. See §5.3. |
 | `SIGNATURE_VERSION` | No | `v3` | `v3` or `v2`. See §4. |
-| `STOPPED_MODE` | No | unset | `StopCharging`, `KeepCharging`, or unset. See §6.4. |
+| `STOPPED_MODE` | No | `KeepCharging` | `StopCharging` or `KeepCharging`. See §6.4. |
 
 ### 2.3 Validation
 
@@ -54,7 +55,7 @@ Validation rules:
 | `WEBHOOK_URL` not an absolute `https://` URL | config error |
 | `REGION_ID` or `ECS_INSTANCE_ID` absent | config error |
 | `SIGNATURE_VERSION` not in {`v2`, `v3`} | config error |
-| `STOPPED_MODE` not in {`StopCharging`, `KeepCharging`} and not unset | config error |
+| `STOPPED_MODE` not in {`StopCharging`, `KeepCharging`} | config error |
 
 Validation **MUST NOT** echo the offending value when that value came from a secret
 binding. Non-secret bindings MAY be named in the error.
@@ -293,11 +294,49 @@ No safe transition exists for these rows and none is invented.
 release. Force-stopping risks filesystem corruption and is exactly the kind of
 destructive shortcut this project exists to avoid.
 
-`StoppedMode` is sent only when `STOPPED_MODE` is configured. When unset, the request
-omits it and the instance's account/console configuration governs. Implementers MUST
-record that if the instance does not support economical mode, Alibaba **returns no
-error** and stops the instance under the priority mode instead — the configured mode is
-silently ignored. `StoppedMode` is therefore never assumed to have taken effect.
+`StoppedMode` defaults to **`KeepCharging`** and is sent on every stop request. It
+remains configurable so it can be changed to `StopCharging` later without any code
+change.
+
+**Owner decision and rationale.** The primary objective of this project is CDT traffic
+enforcement with reliable automatic recovery, not compute-cost optimisation.
+`KeepCharging` preserves instance resources — including the public IP and any local
+state — and avoids introducing economical-mode restart-capacity and public-IP risks
+into the initial release.
+
+Two behaviours constrain how this is implemented:
+
+1. **Success is not evidence of effect.** Alibaba **returns no error** when an instance
+   does not support economical mode; it stops under the priority mode instead and the
+   configured `StoppedMode` is silently ignored. The implementation MUST NOT infer that
+   the requested mode took effect merely because `StopInstance` returned success. The
+   mode is reported as *requested*, never as *applied*, and no branch of logic may
+   depend on it having taken effect.
+2. **If `StopCharging` is selected later**, the operator MUST first read the documented
+   implications below. The configuration is therefore safe to change but not safe to
+   change blindly.
+
+#### Implications of selecting `StopCharging` (documentation obligation)
+
+These MUST be recorded in the operations documentation so that a future operator
+changing `STOPPED_MODE` to `StopCharging` does so with the consequences visible:
+
+- **Restart capacity risk** — a stopped-with-charging-disabled instance releases its
+  compute resources, so a later `StartInstance` depends on capacity being available for
+  that instance type in that zone. `OperationDenied.NoStock` becomes a live failure mode
+  that does not exist under `KeepCharging`. Under this project's design that failure
+  surfaces as `stage: "ecs-start"` with the instance left stopped — i.e. traffic
+  enforcement succeeds but automatic recovery may not.
+- **Public IP risk** — depending on the instance's public-IP addressing mode, releasing
+  resources can change or lose the public address, which for a traffic-relay use case
+  can break the very relay the instance exists to provide. The address MUST be verified
+  as preserved before trusting `StopCharging` in production.
+- **Silent-ignore caveat still applies** — neither risk produces an error at stop time.
+  Both are discovered only at restart, which is the worst possible moment.
+
+`ForceStop` is `false` and MUST NOT be made configurable to `true` in the initial
+release. Force-stopping risks filesystem corruption and is exactly the kind of
+destructive shortcut this project exists to avoid.
 
 ### 6.5 Hierarchy of authority
 
@@ -328,12 +367,18 @@ owner's decision.
   "ecsStatusBefore": "running",
   "ecsStatusAfter": "stopped",
   "action": "stop",
+  "stoppedModeRequested": "KeepCharging",
   "instanceId": "i-xxxxxxxx",
   "region": "cn-hongkong",
   "time": "2026-09-20T15:20:58Z",
   "durationMs": 812
 }
 ```
+
+`stoppedModeRequested` is present only when a stop was issued, and records the mode
+that was **requested** in the request — never a claim that it was applied. Per §6.4,
+Alibaba silently ignores an unsupported mode and returns no error, so the applied mode
+is not observable from the API response and MUST NOT be inferred or reported.
 
 `action` ∈ {`none-running`, `none-starting`, `none-stopped`, `none-stopping`,
 `start`, `stop`, `fail-safe`}. `ecsStatusAfter` is the state observed from **one**
@@ -475,8 +520,11 @@ any existing test of that kind MUST be removed rather than re-pinned.
 
 ## 14. Open questions
 
-Q1–Q4 from the PLAN remain open and are resolved by configuration defaults rather than
-by assumptions baked into code: summation scope (Q1), `StoppedMode` (Q2), region
-identifier namespace (Q3), Cloudflare plan (Q4). Each has a stated default in §2.2,
-§5.3, and §6.4, so implementation is unblocked while the owner's answers can still
-change behaviour without code changes.
+Q1, Q3, and Q4 from the PLAN remain open and are resolved by configuration defaults
+rather than by assumptions baked into code: summation scope (Q1), region identifier
+namespace (Q3), Cloudflare plan (Q4). Each has a stated default in §2.2, §5.3, and
+§6.4, so implementation is unblocked while the owner's answers can still change
+behaviour without code changes.
+
+**Q2 (`StoppedMode`) is resolved** by owner decision: default `KeepCharging`, configurable,
+with `StopCharging` implications documented in §6.4.

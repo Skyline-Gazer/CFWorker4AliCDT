@@ -1,8 +1,10 @@
 # CFWorker4AliCDT — Project Plan
 
-> Status: **Draft for owner review.** This document is planning only. It contains no
-> runtime implementation, and implementation MUST NOT begin until this PLAN and its
-> companion [project-spec.md](./project-spec.md) are approved.
+> Status: **APPROVED by owner (2026-09-20).** This document is the approved planning
+> baseline. Implementation proceeds under TDD in phases P0–P7, with the GitHub Project
+> as the canonical execution tracker. No local TODO/tracker Markdown files.
+>
+> Amendment: PLAN Q2 (`StoppedMode`) resolved by owner — default `KeepCharging`.
 
 ## 1. Document control
 
@@ -397,12 +399,13 @@ implement, make it pass, refactor.
 | # | Question | Why it matters | Proposed default |
 | --- | --- | --- | --- |
 | Q1 | **Summation scope.** Sum all `TrafficDetails` entries, or only those whose `BusinessRegionId` equals the configured `REGION_ID`? The two reference implementations disagree. No official source defines the semantics. | Changes the effective threshold. Summing everything is the conservative choice; filtering is the literal reading of "this region's traffic". | Sum **all** entries, treat the result as the total internet traffic, and expose the per-region breakdown in the webhook payload so the choice is auditable. |
-| Q2 | **`StoppedMode`.** `KeepCharging` (predictable billing, keeps the instance reserved) or `StopCharging` (stops billing, may require capacity to be available again)? | Directly affects cost and restart reliability. | Unset by default — i.e. defer to the instance's account/console configuration — and documented, since pinning `StopCharging` risks a failed restart on scarce instance types, while pinning `KeepCharging` silently keeps billing. **Owner should confirm.** |
+| Q2 | **`StoppedMode`** — **RESOLVED by owner: `KeepCharging` (default).** Rationale: the primary objective is CDT traffic enforcement with reliable automatic recovery, not compute-cost optimisation; `KeepCharging` preserves instance resources and avoids economical-mode restart/inventory and public-IP risks in v1. Remains configurable to `StopCharging` without code changes. `ForceStop=false`; the mode is never inferred to have taken effect from a successful `StopInstance`; `StopCharging` implications documented in SPEC §6.4. | Directly affects cost, restart reliability, and public-IP preservation. | **`KeepCharging`.** |
 | Q3 | **ECS `RegionId` vs CDT `BusinessRegionId`.** Are the ECS region (e.g. `cn-hongkong`) and the CDT business region the same identifier namespace? | Determines whether one variable can serve both, or two are required. | Assume **independent** variables (`REGION_ID` for ECS, optional `BUSINESS_REGION_ID` for CDT), defaulting the latter to unset so no filter is applied. |
 | Q4 | **Cloudflare plan.** Free (10 ms CPU per Cron invocation) or Paid? | Determines retry headroom and whether backoff is viable. | Implement with bounded retries, measure CPU, and state the required plan in the deployment doc. |
 
 ## 14. Acceptance of this PLAN
 
-Implementation of any phase begins only after the owner approves this PLAN and the
-companion SPEC, and after the planning pull request is merged. Until then, the
-repository contains planning documents only.
+**Approved by the owner on 2026-09-20.** Implementation proceeds under TDD in phases
+P0–P7, one pull request per phase, with the GitHub Project as the canonical tracker.
+Normal PR/review gates apply: no deployment and no live ECS mutation without explicit
+owner approval.
