@@ -1,0 +1,50 @@
+{
+  // Cloudflare Worker that enforces an Alibaba Cloud CDT traffic threshold by
+  // starting and stopping a single ECS instance. See docs/planning/project-spec.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cfworker4alicdt",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-20",
+
+  // Scheduled-only Worker. No public control surface is exposed; the fetch
+  // handler serves GET /health and nothing else (SPEC §8).
+  "workers_dev": false,
+
+  // SPEC §11: every 10 minutes. 5-field Quartz-like expression.
+  "triggers": {
+    "crons": ["*/10 * * * *"],
+  },
+
+  // SPEC §11: bound a single invocation. The Free plan enforces 10ms of CPU
+  // per Cron invocation; see docs/operations/ for the measured figure and the
+  // required plan.
+  "limits": {
+    "cpu_ms": 10000,
+  },
+
+  // Deployment fails loudly if any of these is missing, rather than failing at
+  // the first scheduled run (SPEC §2.1). Never put values here.
+  "secrets": {
+    "required": [
+      "ALIYUN_ACCESS_KEY_ID",
+      "ALIYUN_ACCESS_KEY_SECRET",
+      "WEBHOOK_URL",
+      "WEBHOOK_TOKEN",
+    ],
+  },
+
+  // Non-secret defaults, matching SPEC §2.2 field-for-field. This file is the
+  // single place a default is stated.
+  "vars": {
+    "TRAFFIC_THRESHOLD_GB": "180",
+    "CDT_ENDPOINT": "cdt.aliyuncs.com",
+    "SIGNATURE_VERSION": "v3",
+    "STOPPED_MODE": "KeepCharging",
+    // REGION_ID and ECS_INSTANCE_ID are required and deliberately have no
+    // default. BUSINESS_REGION_ID is optional and unset by default.
+  },
+
+  "observability": {
+    "enabled": true,
+  },
+}

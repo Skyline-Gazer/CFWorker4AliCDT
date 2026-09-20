@@ -1,0 +1,53 @@
+name: CI
+
+# Runs the same checks a developer runs locally, in the same order.
+#
+# This workflow MUST NOT authenticate to Alibaba Cloud or Cloudflare, and MUST
+# NOT deploy. It references no credentials, so it is structurally incapable of
+# mutating a live account (PLAN R10). Do not add a secrets reference here.
+#
+# The unit tests run entirely offline; a test that reaches the network is a
+# defect (SPEC §12).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Format, lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
