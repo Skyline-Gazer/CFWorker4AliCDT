@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Wrangler local state and build output
+.wrangler/
+dist/
+worker-configuration.d.ts
+
+# Test output
+coverage/
+
+# Secrets — never commit any of these
+.dev.vars
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.DS_Store
+*.log
