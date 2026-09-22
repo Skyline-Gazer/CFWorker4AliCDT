@@ -92,6 +92,16 @@ function nullish<T>(value: T | undefined): T | null {
 }
 
 /**
+ * A derived value that is not finite is not a value.
+ *
+ * `Infinity` and `NaN` have no defined persistent form in SQLite, so they are
+ * stored as NULL rather than as something the reader would have to interpret.
+ */
+function finiteOrNull(value: number): number | null {
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
  * Was the *control* outcome successful?
  *
  * A run that aborted before touching ECS (`config`, `cdt-query`,
@@ -118,8 +128,23 @@ export function buildRow(report: HistoryReport): RowInsert {
   const trafficKnown = report.trafficGB !== undefined && Number.isFinite(report.trafficGB);
   const trafficGB = trafficKnown ? report.trafficGB : undefined;
 
-  const usagePercent = trafficGB === undefined ? null : (trafficGB / report.thresholdGB) * 100;
-  const remainingGB = trafficGB === undefined ? null : report.thresholdGB - trafficGB;
+  // `usage_percent` divides by the threshold, so a zero threshold would make it
+  // `Infinity`. A non-finite REAL has no defined persistent form — SQLite may
+  // reject it, store NULL, or coerce it depending on the driver's JSON handling
+  // — so it is normalised to NULL here rather than left to chance. `loadConfig`
+  // rejects a non-positive threshold, but this function must be total on its own
+  // inputs rather than relying on a caller upstream (SPEC §5.4: a value that
+  // cannot be established is not a value).
+  const thresholdUsable = Number.isFinite(report.thresholdGB) && report.thresholdGB > 0;
+
+  const usagePercent =
+    trafficGB === undefined || !thresholdUsable
+      ? null
+      : finiteOrNull((trafficGB / report.thresholdGB) * 100);
+  const remainingGB =
+    trafficGB === undefined || !thresholdUsable
+      ? null
+      : finiteOrNull(report.thresholdGB - trafficGB);
 
   return {
     checked_at: report.time,

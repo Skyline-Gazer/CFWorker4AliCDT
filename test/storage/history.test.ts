@@ -139,6 +139,27 @@ describe("buildRow — maps the report onto SPEC §9.3", () => {
     expect(row.webhook_ok).toBeNull();
   });
 
+  it("does not store a non-finite derived value", () => {
+    // `usage_percent` divides by the threshold. A zero threshold makes it
+    // `Infinity`, and a non-finite REAL has no defined persistent form: it may
+    // be rejected, stored as NULL, or stored oddly depending on the driver's
+    // JSON handling. `loadConfig` rejects a non-positive threshold, but
+    // `buildRow` must be total on its own inputs rather than relying on a caller
+    // upstream (SPEC §5.4 — a value that cannot be established is not a value).
+    const row = buildRow({ ...SUCCESS, thresholdGB: 0 });
+    expect(Number.isFinite(row.usage_percent)).toBe(false);
+    expect(row.usage_percent).toBeNull();
+  });
+
+  it("never stores a non-finite traffic value", () => {
+    for (const trafficGB of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const row = buildRow({ ...SUCCESS, trafficGB });
+      expect(row.traffic_gb).toBeNull();
+      expect(row.usage_percent).toBeNull();
+      expect(row.remaining_gb).toBeNull();
+    }
+  });
+
   it("does not record its own insert success in the row (SPEC §9.6)", () => {
     // A row cannot describe the insert that would have to succeed for the field
     // to exist. `storageOk` belongs to the caller's report, not the row.
