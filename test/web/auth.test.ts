@@ -149,6 +149,40 @@ describe("authenticate — malformed input is never authenticated (SPEC §8.2)",
     expect(authenticate(`Custom s3cret-token`, CONFIG).ok).toBe(false);
     expect(authenticate(`Basic s3cret-token`, CONFIG).ok).toBe(false);
   });
+
+  it("does not treat a raw Base64 credential without a scheme as authenticated", () => {
+    expect(authenticate(btoa("admin:s3cret-token"), CONFIG).ok).toBe(false);
+  });
+
+  it("does not accept a token-only value with no username separator", () => {
+    // `Basic <token>` has no colon, so it is not a Basic credential at all.
+    expect(authenticate(`Basic ${btoa("s3cret-token")}`, CONFIG).ok).toBe(false);
+    expect(authenticate("Basic s3cret-token", CONFIG).ok).toBe(false);
+  });
+
+  it("rejects a non-ASCII homoglyph username rather than folding it", () => {
+    // 'à' (U+00E0) is Latin-1 representable, so it survives `btoa`, and is
+    // visually confusable with 'a'. No normalisation is applied, so the
+    // comparison must fail. `atob` decodes Latin-1, so a UTF-8 credential would
+    // also mis-decode — which fails closed, the safe direction.
+    expect(authenticate(basic("\u00e0dmin", "s3cret-token"), CONFIG).ok).toBe(false);
+    // Sanity: the same construction with the correct user does authenticate,
+    // so the failure above is the homoglyph and not a broken fixture.
+    expect(authenticate(basic("admin", "s3cret-token"), CONFIG).ok).toBe(true);
+  });
+
+  it("rejects a credential with a trailing newline appended", () => {
+    // Header-splitting attempts must not smuggle a valid credential through.
+    expect(authenticate(`${basic("admin", "s3cret-token")}\nX-Injected: 1`, CONFIG).ok).toBe(false);
+  });
+
+  it("treats a trailing space in the token as significant", () => {
+    expect(authenticate(basic("admin", "s3cret-token "), CONFIG).ok).toBe(false);
+  });
+
+  it("does not accept a token containing an appended null byte", () => {
+    expect(authenticate(basic("admin", "s3cret-token\u0000"), CONFIG).ok).toBe(false);
+  });
 });
 
 describe("authenticate — fail closed when ADMIN_TOKEN is absent (SPEC §8.3)", () => {
