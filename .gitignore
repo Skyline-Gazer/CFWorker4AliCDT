@@ -9,6 +9,9 @@ worker-configuration.d.ts
 # Test output
 coverage/
 
+# CodeGraph local index
+.codegraph/
+
 # Secrets — never commit any of these
 .dev.vars
 .env

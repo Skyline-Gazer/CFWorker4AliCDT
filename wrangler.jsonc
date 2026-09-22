@@ -47,4 +47,17 @@
   "observability": {
     "enabled": true,
   },
+
+  // D1 monitoring history (SPEC §9.3). The binding is declared without a
+  // `database_id`: the field is documented as optional, and the local
+  // development and test path uses Wrangler's local D1 emulation only. No
+  // remote database is provisioned or referenced here, so a production
+  // `database_id` is supplied at deploy time by the owner, not invented here.
+  "d1_databases": [
+    {
+      "binding": "TRAFFIC_DB",
+      "database_name": "cfworker4alicdt-traffic",
+      "migrations_dir": "migrations",
+    },
+  ],
 }
