@@ -653,8 +653,10 @@ scheduled control path, which never reads history.
 
 ### 9.7 Retention
 
-Rows accumulate at the Cron cadence (~144/day). Retention and pruning are an explicit
-operations task (PLAN Q5). v1 performs no automatic deletion.
+Rows accumulate at the Cron cadence (~144/day). Per owner decision (PLAN **Q5**,
+resolved 2026-09-22), v1 retains them **indefinitely** and performs no automatic
+deletion. Pruning is an explicit operations task if unbounded growth later becomes a
+concern.
 
 ## 10. Manual query vs scheduled control
 
@@ -740,11 +742,15 @@ any existing test of that kind MUST be removed rather than re-pinned.
 
 ## 14. Open questions
 
-Q1, Q3, Q4 from the PLAN remain open and are resolved by configuration defaults rather
-than by assumptions baked into code: summation scope (Q1), region identifier namespace
-(Q3), Cloudflare plan (Q4). Q5 (history retention) and Q6 (repository visibility /
-branch protection) are new in Revision 2. Each has a stated default in the PLAN, so
-implementation is unblocked while the owner's answers can still change behaviour
+Q1 and Q3 from the PLAN remain open and are resolved by configuration defaults rather
+than by assumptions baked into code: summation scope (Q1) and region identifier
+namespace (Q3). **Q4 (Cloudflare plan), Q5 (history retention), and Q6 (repository
+visibility / branch protection)** are resolved by owner decision (2026-09-22): the
+project stays on the Workers Free plan initially and measures CPU before any upgrade
+(§11, risk R8); `traffic_checks` is retained indefinitely with no automatic deletion
+(§9.7); and the repository is public, so the `main` protection ruleset is enabled
+(PLAN §14.1, risk R11). Each resolved item has a stated default in the PLAN, so
+implementation is unblocked while any remaining owner answer can still change behaviour
 without code changes.
 
 **Q2 (`StoppedMode`) is resolved** by owner decision: default `KeepCharging`,

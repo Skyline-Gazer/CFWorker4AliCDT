@@ -10,16 +10,21 @@
 >
 > Amendment carried forward: PLAN Q2 (`StoppedMode`) resolved by owner — default
 > `KeepCharging`.
+>
+> Amendment (2026-09-22): the owner approved Revision 2 as the target canonical
+> architecture and resolved **Q4** (remain on Workers Free; measure before upgrading),
+> **Q5** (retain D1 history indefinitely), and **Q6** (repository is public; enable the
+> `main` protection ruleset — R11 resolved, Issue #15 unblocked).
 
 ## 1. Document control
 
 | Field | Value |
 | --- | --- |
-| Repository | `Skyline-Gazer/CFWorker4AliCDT` (private) |
+| Repository | `Skyline-Gazer/CFWorker4AliCDT` (**public**) |
 | Planning baseline SHA | `1afffec` — planning docs present on `main` |
 | Revision branch | `docs/web-d1-architecture-revision` |
 | Companion spec | [`project-spec.md`](./project-spec.md) |
-| Implementation state at revision | P0 and P1 **complete**, both open, unmerged (PR #34, PR #35) |
+| Implementation state at revision | P0 **merged** (`c6380e4`); P1 open (PR #35); P2/P3 open (PR #37) |
 | Deployment state | **None.** No Worker has been deployed. No live Alibaba Cloud call has been made. |
 
 ## 2. Architecture delta (Revision 1 → Revision 2)
@@ -632,24 +637,28 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
 - CI validates by installing, formatting, linting, type-checking, and running tests. CI
   performs **no** deployment and makes **no** live API call.
 
-### 14.1 Branch protection — platform limitation
+### 14.1 Branch protection
 
-The intended `main` ruleset (pull request required, CI status check required) **cannot
-be applied** on the current repository: it is private under a free organization plan,
-and GitHub returns `403 Upgrade to GitHub Pro or make this repository public to enable
-this feature` for both the rulesets and branch-protection endpoints. The ready-to-apply
-ruleset payload is recorded in Issue [#15](https://github.com/Skyline-Gazer/CFWorker4AliCDT/issues/15).
+**Resolved by owner decision (2026-09-22).** The repository is **public**, so the
+platform limitation recorded in Revision 1 no longer applies. The earlier constraint —
+a private repository under a free organization plan returning `403 Upgrade to GitHub
+Pro or make this repository public` — is historical and no longer blocks the intended
+`main` ruleset.
 
-Until the owner changes repository visibility or plan, the workflow is
-**convention-enforced**:
+The owner has instructed that the intended ruleset (a pull request required, a passing
+CI status check required, force-push and deletion restricted) be **enabled**. Issue
+[#15](https://github.com/Skyline-Gazer/CFWorker4AliCDT/issues/15) is unblocked and
+tracks the change.
+
+The workflow is therefore both convention-enforced and, once the ruleset is applied,
+**technically enforced**:
 
 ```
 Issue → branch → TDD → PR → CI → review → merge
 ```
 
-Direct push to `main` remains prohibited by convention even though GitHub cannot
-technically block it. This is a **residual risk carried knowingly** (R11), not a reason
-to defer P2 or later phases.
+Direct push to `main` is prohibited, and is now rejected by the repository ruleset
+rather than by convention alone.
 
 ## 15. Delivery phases
 
@@ -723,7 +732,7 @@ test, implement, make it pass, refactor.
 | R8 | Cron CPU limit is 10 ms on the free plan. | Runs are terminated mid-flight. | Measure actual CPU. D1 writes add work to the scheduled path; if the free plan is insufficient, the paid plan is a documented prerequisite rather than a silent assumption. |
 | R9 | Workers Logs persist by default. | Secret leakage into retained logs. | Centralised redaction; secrets never interpolated into log or error strings; tested. |
 | R10 | CI or a test could accidentally perform a live mutation. | Unintended instance stop/start. | All network mocked; no credentials in CI; deployment is manual, environment-gated, and separate from PR CI. |
-| **R11** | **Branch protection cannot be enforced** (private repo, free org plan, GitHub returns 403). | A direct push to `main` would bypass CI and review. | Convention-enforced workflow; risk accepted knowingly. Removed by making the repo public, upgrading the plan, or moving the repo to an org with protection available. |
+| **R11** | **Branch protection** — previously unenforceable (private repo, free org plan, GitHub returned 403). | A direct push to `main` would bypass CI and review. | **Resolved (2026-09-22):** the repository is now public, so the intended ruleset can be applied. Owner instructed it be enabled; tracked by Issue #15. |
 | **R12** | **D1 availability/limits** — writes on every scheduled run add a failure mode and consume D1 quota. | A D1 outage could be mistaken for a control failure; quota exhaustion could silently degrade history. | D1 is never a control input (invariant I8). Write failures are isolated and logged. Retention/pruning is an explicit operations task. |
 
 ## 17. Issue reconciliation (planned, not yet executed)
@@ -761,13 +770,25 @@ During this revision **no** Issue is created, closed, or edited.
 5. **Cron remains the only ECS mutation authority in v1.**
 6. Web dashboard and D1 history are **v1 requirements**, not non-goals.
 
+**Resolved by the owner (2026-09-22):**
+
+7. **Q4 — Cloudflare plan.** Remain on the **Free** plan initially and implement within
+   the 10 ms Cron CPU budget; benchmark actual HTTP and Cron CPU usage and upgrade to
+   Paid only if the measured usage or risk requires it. The required plan is still to be
+   stated in the deployment documentation once measured (§14).
+8. **Q5 — History retention.** Retain `traffic_checks` rows **indefinitely in v1**; no
+   automatic deletion. Pruning remains an explicit operations task if it is later needed.
+9. **Q6 — Repository visibility / plan.** The repository is **public**; branch protection
+   is therefore available and the owner has instructed it be enabled (R11 resolved, #15
+   unblocked).
+
 **Resolved during planning (no owner input required):**
 
-7. CDT API version is `2021-08-13`, correcting the brief's `2021-08-31`.
-8. There is no pagination for `ListCdtInternetTraffic`; the brief's pagination test is
-   replaced by multi-entry summation.
-9. Signing method is V3, with a configuration switch and both fixtures pinned.
-10. `cdt.aliyuncs.com` becomes configuration with that default, flagged for empirical
+10. CDT API version is `2021-08-13`, correcting the brief's `2021-08-31`.
+11. There is no pagination for `ListCdtInternetTraffic`; the brief's pagination test is
+    replaced by multi-entry summation.
+12. Signing method is V3, with a configuration switch and both fixtures pinned.
+13. `cdt.aliyuncs.com` becomes configuration with that default, flagged for empirical
     confirmation.
 
 **Open, requiring owner confirmation before or at deployment:**
@@ -776,9 +797,6 @@ During this revision **no** Issue is created, closed, or edited.
 | --- | --- | --- | --- |
 | Q1 | **Summation scope.** Sum all `TrafficDetails` entries, or only those whose `BusinessRegionId` equals the configured region? The two reference implementations disagree and no official source defines the semantics. | Changes the effective threshold. | Sum **all** entries, expose the per-region breakdown in the webhook payload and dashboard so the choice is auditable. |
 | Q3 | **ECS `RegionId` vs CDT `BusinessRegionId`.** Same identifier namespace? | Determines whether one variable serves both. | Assume **independent** variables, defaulting `BUSINESS_REGION_ID` to unset. |
-| Q4 | **Cloudflare plan.** Free (10 ms CPU per Cron invocation) or Paid? | Determines retry headroom, and whether D1 writes plus a live dashboard route fit the CPU budget. | Implement with bounded retries, measure CPU, state the required plan in the deployment doc. |
-| **Q5** | **History retention.** How long should `traffic_checks` rows be kept? At a 10-minute cadence, 144 rows/day ≈ 52,560 rows/year. | Unbounded growth quietly consumes D1 quota. | Retain 90 days and document a pruning procedure; no automatic deletion in v1. |
-| **Q6** | **Repository visibility / plan**, to enable enforced branch protection (R11). | Determines whether the PR+CI gate is technically enforced or convention-only. | Convention-enforced until the owner decides; not a blocker for P2. |
 
 **Q2 (`StoppedMode`) is resolved** by owner decision: default `KeepCharging`,
 configurable, with `StopCharging` implications documented in SPEC §6.4.
