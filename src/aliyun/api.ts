@@ -67,13 +67,25 @@ export interface TrafficBreakdownEntry {
 }
 
 export interface TrafficReading {
-  /** Sum over every `TrafficDetails` entry. Decimal bytes, as the API reports. */
+  /**
+   * Sum over every `TrafficDetails` entry, in the unit the API reports.
+   *
+   * **ASSUMPTION (PLAN R4, SPEC §3):** this is treated as **bytes**. No Alibaba
+   * prose source states the unit — it is inferred from the SDK's `long` typing
+   * and from independent implementations. The unit MUST be verified against the
+   * Alibaba console before enforcement is trusted. It is never implicit: the
+   * byte→GB boundary is crossed in exactly one named function
+   * (`trafficBytesToDecimalGb`), so a corrected unit changes one line.
+   */
   readonly totalBytes: number;
   readonly entries: readonly TrafficBreakdownEntry[];
 }
 
 /**
  * Bytes in one decimal gigabyte, per SPEC §3.
+ *
+ * **ASSUMPTION (PLAN R4):** the divisor assumes `Traffic` is reported in bytes.
+ * See `TrafficReading.totalBytes` — the unit is SDK-derived, not documented.
  *
  * Decimal (`1000^3`), **not** binary (`1024^3`). This is a deliberate divergence
  * from the originating script and both independent reference implementations:
