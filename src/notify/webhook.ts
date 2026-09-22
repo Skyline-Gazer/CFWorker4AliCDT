@@ -96,6 +96,11 @@ export type WebhookPayload = SuccessPayload | ErrorPayload;
  * *preserve* the anchor and the scheme word; they are therefore not listed here.
  */
 const PLAIN_KEYS: readonly string[] = [
+  // `accesskey ?id`/`accesskey ?secret` (no underscore) and the underscored
+  // `access_key_id`/`access_key_secret` in UNDERSCORED_KEYS are mutually
+  // exclusive: the former requires `accesskey` as one word. Keeping the sets
+  // disjoint is what prevents a second pass from re-processing an earlier
+  // pass's placeholder.
   "accesskey ?id",
   "accesskey ?secret",
   "signature",
@@ -104,10 +109,42 @@ const PLAIN_KEYS: readonly string[] = [
   "token",
 ];
 
+/**
+ * Key names that carry credentials but contain underscores.
+ *
+ * These need their own pattern because `\b` does not help: `_` is a word
+ * character in JavaScript, so there is no word boundary between `_` and `TOKEN`
+ * in `WEBHOOK_TOKEN`. A `\b`-anchored `token` pattern therefore never matches the
+ * project's own secret binding names — which is exactly how the value of
+ * `WEBHOOK_TOKEN` passed through redaction unaltered.
+ *
+ * Listed explicitly rather than by loosening `\b` to `(?:^|[^A-Za-z0-9])`,
+ * because that loosening would also start matching the `_`-suffixed form of
+ * ordinary words and make prose redaction unpredictable.
+ */
+const UNDERSCORED_KEYS: readonly string[] = [
+  "webhook_token",
+  "admin_token",
+  // `access_key_id` and `access_key_secret` are deliberately the only forms
+  // listed: they match as substrings of `ALIYUN_ACCESS_KEY_ID` /
+  // `ALIYUN_ACCESS_KEY_SECRET` AND standalone. Listing the `aliyun_`-prefixed
+  // variants as well made two patterns match the same text, and the second pass
+  // then re-processed the first pass's placeholder (`…=[REDACTED]]`). The
+  // entries are kept mutually non-overlapping so that cannot recur.
+  "access_key_id",
+  "access_key_secret",
+  "webhook_url",
+];
+
 const REDACTED = "[REDACTED]";
 
 /**
- * Strip credential-shaped content from remote error text (SPEC §7.5).
+ * Strip credential-shaped content from untrusted text (SPEC §7.5).
+ *
+ * This is the project's single sanctioned redaction boundary. The D1 write path
+ * consumes it rather than restating the rules, so a fix here reaches every
+ * destination that persists text; a second, weaker copy previously lived in the
+ * RPC layer and did not cover `Authorization: <value>` forms.
  *
  * Three passes, because one regex cannot cover the forms:
  *
@@ -122,7 +159,7 @@ const REDACTED = "[REDACTED]";
  * so values are treated as opaque: redaction keys off the *name*, never off
  * recognising what the credential looks like.
  */
-function redact(text: string): string {
+export function redact(text: string): string {
   let out = text;
 
   // Pass 1 — scheme-anchored. The anchor, separator, scheme word, and spacing
@@ -142,6 +179,15 @@ function redact(text: string): string {
   for (const key of PLAIN_KEYS) {
     out = out.replace(
       new RegExp(`(\\b(?:${key})\\b["']?\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^&\\s,;}=\\]]+)`, "gi"),
+      `$1${REDACTED}`,
+    );
+  }
+
+  // Pass 2b — underscore-containing key names, which `\b` cannot anchor. Matched
+  // anywhere in the string rather than at a word boundary.
+  for (const key of UNDERSCORED_KEYS) {
+    out = out.replace(
+      new RegExp(`(${key}["']?\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^&\\s,;}=\\]]+)`, "gi"),
       `$1${REDACTED}`,
     );
   }
