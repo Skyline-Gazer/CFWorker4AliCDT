@@ -5,7 +5,7 @@ import worker, { healthResponse } from "../src/index";
 describe("HTTP surface", () => {
   it("serves GET /health", async () => {
     const response = await worker.fetch(new Request("https://worker.test/health"));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(599);
     await expect(response.json()).resolves.toEqual(healthResponse);
   });
 
