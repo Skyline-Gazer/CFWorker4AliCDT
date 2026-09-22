@@ -57,9 +57,9 @@ function harness(overrides: Partial<PipelineDeps> = {}): Harness {
       counters.starts += 1;
       return (overrides.startInstance ?? defaults.startInstance)();
     },
-    stopInstance: () => {
+    stopInstance: (stoppedMode) => {
       counters.stops += 1;
-      return (overrides.stopInstance ?? defaults.stopInstance)();
+      return (overrides.stopInstance ?? defaults.stopInstance)(stoppedMode);
     },
     notify: overrides.notify ?? defaults.notify,
     now: overrides.now ?? defaults.now,
@@ -275,6 +275,38 @@ describe("runPipeline — webhook isolation (SPEC §7.1)", () => {
     const report = await runPipeline(h.deps, CONFIG);
     expect(report.action).toBe("start");
     expect(h.starts).toBe(1);
+  });
+});
+
+describe("runPipeline — stopped mode consistency (SPEC §7.3)", () => {
+  it("passes the configured mode to stopInstance, matching what the report claims", async () => {
+    // The report records the mode that was *requested in the request*. If the
+    // pipeline recorded one mode while the call carried another, the report
+    // would misdescribe what was sent — and the mode is the one field an
+    // operator uses to reason about billing behaviour (SPEC §6.4).
+    const seen: string[] = [];
+    const h = harness({
+      getTraffic: () => Promise.resolve({ totalBytes: 200_000_000_000, entries: [] }),
+      stopInstance: (stoppedMode) => {
+        seen.push(stoppedMode);
+        return Promise.resolve({ requested: true });
+      },
+    });
+    const report = await runPipeline(h.deps, { ...CONFIG, stoppedMode: "StopCharging" });
+    expect(seen).toEqual(["StopCharging"]);
+    expect(report.stoppedModeRequested).toBe("StopCharging");
+  });
+
+  it("does not pass a mode when no stop is issued", async () => {
+    const seen: string[] = [];
+    const h = harness({
+      stopInstance: (stoppedMode) => {
+        seen.push(stoppedMode);
+        return Promise.resolve({ requested: true });
+      },
+    });
+    await runPipeline(h.deps, CONFIG);
+    expect(seen).toEqual([]);
   });
 });
 

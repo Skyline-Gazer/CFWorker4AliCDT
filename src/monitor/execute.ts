@@ -48,7 +48,14 @@ export interface PipelineDeps {
     InstanceObservation | RpcError | TrafficUnavailableError
   >;
   readonly startInstance: () => Promise<{ readonly requested: true } | RpcError>;
-  readonly stopInstance: () => Promise<{ readonly requested: true } | RpcError>;
+  /**
+   * Request a stop. The mode is passed to the call site so the report's
+   * `stoppedModeRequested` is derived from what was actually sent, never from a
+   * separate copy that could diverge (SPEC §7.3, §6.4).
+   */
+  readonly stopInstance: (
+    stoppedMode: "StopCharging" | "KeepCharging",
+  ) => Promise<{ readonly requested: true } | RpcError>;
   /** Reporting side channel. Its result never affects control (SPEC §7.1). */
   readonly notify: (report: RunReport) => Promise<{ readonly ok: boolean }>;
   readonly now: () => number;
@@ -213,7 +220,7 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
 
   // 6/7. At most one mutation, through the single call site below.
   if (decision.mutation) {
-    const outcome = await issueMutation(deps, decision);
+    const outcome = await issueMutation(deps, decision, config);
     if (outcome.error !== undefined) {
       return finish(deps, startedAt, base, {
         status: "error",
@@ -265,6 +272,7 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
 async function issueMutation(
   deps: PipelineDeps,
   decision: Decision,
+  config: PipelineConfig,
 ): Promise<{ error: { stage: ErrorStage; message: string } | undefined }> {
   if (decision.action === "start") {
     const result = await deps.startInstance();
@@ -273,11 +281,11 @@ async function issueMutation(
       : { error: undefined };
   }
   if (decision.action === "stop") {
-    // `stoppedMode` is sent and reported as *requested*, never as applied:
-    // Alibaba returns success when the mode is unsupported and silently ignores
-    // it (SPEC §6.4). The caller passes it through `PipelineConfig` and records
-    // it on the report; nothing here branches on it having taken effect.
-    const result = await deps.stopInstance();
+    // The configured mode is passed to the call, so what is sent and what the
+    // report records are the same value. It is reported as *requested*, never
+    // as applied: Alibaba returns success when the mode is unsupported and
+    // silently ignores it (SPEC §6.4).
+    const result = await deps.stopInstance(config.stoppedMode);
     return isError(result)
       ? { error: { stage: "ecs-stop", message: describeError(result) } }
       : { error: undefined };
