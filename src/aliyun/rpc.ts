@@ -375,23 +375,20 @@ export async function callRpc<T = Record<string, unknown>>(
       return { ok: false, error: lastError, attempts };
     }
 
-    // A retryable HTTP failure is retried once. `interpretBody` owns the
-    // classification, so this only decides whether to repeat.
-    if (response.status === 429 || response.status >= 500) {
-      const outcome = interpretBody(response.status, parsed);
-      const error = outcome.ok
-        ? new RpcError("server", `Request failed (HTTP ${response.status})`, response.status)
-        : outcome.error;
-      if (attempt === 0) {
-        lastError = error;
-        continue;
-      }
-      return { ok: false, error, attempts };
-    }
-
+    // `interpretBody` owns the classification; retry exactly when it reports a
+    // retryable failure. That is transport throws (above), HTTP 429 and >= 500,
+    // and — per SPEC §4.6 — a 2xx body carrying a throttle-style code, which
+    // Alibaba returns often enough that keying on HTTP status alone would label
+    // it retryable yet never actually retry it. Client, `api`, and parse
+    // failures are final.
     const outcome = interpretBody(response.status, parsed);
-    if (!outcome.ok) return { ok: false, error: outcome.error, attempts };
-    return { ok: true, data: parsed as T, attempts };
+    if (outcome.ok) return { ok: true, data: parsed as T, attempts };
+
+    if (outcome.error.retryable && attempt === 0) {
+      lastError = outcome.error;
+      continue;
+    }
+    return { ok: false, error: outcome.error, attempts };
   }
 
   return {

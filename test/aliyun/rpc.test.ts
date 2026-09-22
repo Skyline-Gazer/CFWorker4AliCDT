@@ -229,6 +229,25 @@ describe("callRpc — retry behaviour", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("retries a 2xx body carrying a throttling code", async () => {
+    // SPEC §4.6 makes a throttle-style code retryable regardless of HTTP
+    // status. Alibaba returns these with a 2xx often enough that only keying
+    // on status would classify them as retryable yet never actually retry.
+    const { fetch, calls } = stubFetch([json({ Code: "Throttling.User" }), json({ Code: "ok" })]);
+    const result = await callRpc({ ...BASE, fetch });
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("gives up after two 2xx throttle responses", async () => {
+    const { fetch, calls } = stubFetch([json({ Code: "Throttling.User" })]);
+    const result = await callRpc({ ...BASE, fetch });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe("throttle");
+    expect(calls).toHaveLength(2);
+  });
+
   it("does NOT retry a parse failure", async () => {
     const { fetch, calls } = stubFetch([new Response("not json", { status: 200 })]);
     await callRpc({ ...BASE, fetch });
