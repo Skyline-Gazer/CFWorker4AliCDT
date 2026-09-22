@@ -154,6 +154,55 @@ describe("buildPayload — secret hygiene (SPEC §7.5)", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("sk-live-abcdef123456");
   });
+
+  it("redacts an Authorization header value without the Bearer keyword", () => {
+    // Remote validation errors echo request headers verbatim. The value can be
+    // opaque (a signed URL, a custom scheme), so the key itself must trigger
+    // redaction rather than relying on recognising the scheme word.
+    const payload = buildPayload({
+      ...ERROR,
+      error: "Authorization: Basic dXNlcjpwYXNz refused",
+    });
+    expect(JSON.stringify(payload)).not.toContain("dXNlcjpwYXNz");
+  });
+
+  it("redacts an authorization key/value pair in either separator form", () => {
+    for (const message of [
+      "authorization=Tok3nSecretValue",
+      "authorization: Tok3nSecretValue",
+      'Authorization="Tok3nSecretValue"',
+    ]) {
+      const payload = buildPayload({ ...ERROR, error: message });
+      expect(JSON.stringify(payload), message).not.toContain("Tok3nSecretValue");
+    }
+  });
+
+  it("redacts a signature value echoed in a query string", () => {
+    const payload = buildPayload({
+      ...ERROR,
+      error: "Signature=9NaGiOspFP5UPcwX8Iwt2YJXXuk%3D was invalid",
+    });
+    expect(JSON.stringify(payload)).not.toContain("9NaGiOspFP5UPcwX8Iwt2YJXXuk");
+  });
+
+  it("leaves ordinary error text readable", () => {
+    const payload = buildPayload({
+      ...ERROR,
+      error: "CDT response had no TrafficDetails",
+    });
+    expect(payload).toMatchObject({ error: "CDT response had no TrafficDetails" });
+  });
+
+  it("preserves the anchor and scheme word without leaving placeholder fragments", () => {
+    // Two redaction passes must operate on disjoint keys, or the second pass
+    // re-processes the first pass's placeholder and emits `[REDACTED]]`. This
+    // asserts the exact output so that cannot regress silently.
+    const payload = buildPayload({
+      ...ERROR,
+      error: "Authorization: Bearer sk-live-abcdef123456 rejected",
+    });
+    expect(payload).toMatchObject({ error: "Authorization: Bearer [REDACTED] rejected" });
+  });
 });
 
 describe("notify — delivery (SPEC §7.7)", () => {

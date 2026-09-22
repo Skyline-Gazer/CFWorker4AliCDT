@@ -84,41 +84,69 @@ export interface ErrorPayload {
 export type WebhookPayload = SuccessPayload | ErrorPayload;
 
 /**
- * Keys whose values are credentials. Duplicated in spirit from `rpc.ts`, but
- * kept local so this module's redaction cannot be changed by an edit elsewhere.
+ * Keys whose values are credentials.
+ *
+ * Split into two disjoint sets so the two redaction passes cannot re-process
+ * each other's output. If a key appeared in both, the second pass would re-match
+ * the first pass's placeholder and leave a fragment of it behind
+ * (`authorization: [REDACTED]]`). Disjoint sets make that structurally impossible
+ * rather than dependent on an escape hatch holding.
+ *
+ * The scheme-anchored names are handled by pass 1's own regex, which must
+ * *preserve* the anchor and the scheme word; they are therefore not listed here.
  */
-const SECRET_PATTERNS: readonly RegExp[] = [
-  /accesskey ?id/gi,
-  /accesskey ?secret/gi,
-  /authorization/gi,
-  /signature/gi,
-  /security ?token/gi,
-  /bearer/gi,
-  /token/gi,
+const PLAIN_KEYS: readonly string[] = [
+  "accesskey ?id",
+  "accesskey ?secret",
+  "signature",
+  "security ?token",
+  "securitytoken",
+  "token",
 ];
 
 const REDACTED = "[REDACTED]";
 
-/** Strip credential-shaped content from remote error text (SPEC §7.5). */
+/**
+ * Strip credential-shaped content from remote error text (SPEC §7.5).
+ *
+ * Three passes, because one regex cannot cover the forms:
+ *
+ * 1. **Scheme-anchored header values.** `Authorization`, `Bearer`, `Basic`, and
+ *    `Digest` are preserved as anchors while the value after them — and any
+ *    scheme word — is replaced. Treating the scheme word as part of the value
+ *    would delete the anchor and leave the credential in place.
+ * 2. **Bare `key=value` / `key: value`.** Covers forms with no scheme word.
+ * 3. **Bare opaque tokens** with no key context at all.
+ *
+ * A remote validation error can echo a request header or a signed URL verbatim,
+ * so values are treated as opaque: redaction keys off the *name*, never off
+ * recognising what the credential looks like.
+ */
 function redact(text: string): string {
   let out = text;
 
-  // `Bearer <value>` first. A key-based pass would otherwise consume the literal
-  // word "Bearer" as the value and leave the token itself untouched.
-  out = out.replace(/\bBearer\s+[^\s,;"'}]+/gi, `Bearer ${REDACTED}`);
+  // Pass 1 — scheme-anchored. The anchor, separator, scheme word, and spacing
+  // are all preserved; only the credential is replaced.
+  out = out.replace(
+    new RegExp(
+      `\\b(Authorization|Bearer|Basic|Digest)\\b(\\s*[:=]?\\s*)(Bearer|Basic|Digest)?(\\s*)("[^"]*"|'[^']*'|[^\\s,;"'}=\\]]+)`,
+      "gi",
+    ),
+    (_match, anchor: string, separator: string, scheme: string | undefined, spacing: string) =>
+      scheme === undefined
+        ? `${anchor}${separator}${REDACTED}`
+        : `${anchor}${separator}${scheme}${spacing}${REDACTED}`,
+  );
 
-  for (const pattern of SECRET_PATTERNS) {
-    const key = pattern.source.replace(/\\/g, "");
-    // `authorization` as a trigger would also strip a following scheme word, so
-    // it is matched only when it carries a value directly (`authorization=...`).
-    if (key === "authorization" || key === "bearer") continue;
+  // Pass 2 — bare key/value pairs on keys disjoint from pass 1.
+  for (const key of PLAIN_KEYS) {
     out = out.replace(
-      new RegExp(`(\\b(?:${key})\\b["']?\\s*[:=]?\\s*)(?:"[^"]*"|'[^']*'|[^&\\s,}]+)`, "gi"),
+      new RegExp(`(\\b(?:${key})\\b["']?\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^&\\s,;}=\\]]+)`, "gi"),
       `$1${REDACTED}`,
     );
   }
 
-  // Long opaque tokens with no key context.
+  // Pass 3 — long opaque tokens with no key context at all.
   out = out.replace(/\b[A-Za-z0-9+/]{32,}={0,2}\b/g, REDACTED);
   return out;
 }
