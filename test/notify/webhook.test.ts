@@ -203,6 +203,29 @@ describe("buildPayload — secret hygiene (SPEC §7.5)", () => {
     });
     expect(payload).toMatchObject({ error: "Authorization: Bearer [REDACTED] rejected" });
   });
+
+  it("redacts the project's underscore-prefixed secret binding names exactly", () => {
+    // `_` is a word character, so a `\b`-anchored key pattern never matches
+    // `WEBHOOK_TOKEN`. Covered by a dedicated pass; the exact output is asserted
+    // because overlapping key patterns previously produced `[REDACTED]]`.
+    const cases: readonly [string, string][] = [
+      ["WEBHOOK_TOKEN=tok123", "WEBHOOK_TOKEN=[REDACTED]"],
+      ["ADMIN_TOKEN=tok123", "ADMIN_TOKEN=[REDACTED]"],
+      ["ALIYUN_ACCESS_KEY_SECRET=LTAI5tSecretValue", "ALIYUN_ACCESS_KEY_SECRET=[REDACTED]"],
+      ["ALIYUN_ACCESS_KEY_ID=LTAI5tSecretValue", "ALIYUN_ACCESS_KEY_ID=[REDACTED]"],
+    ];
+    for (const [message, expected] of cases) {
+      expect(buildPayload({ ...ERROR, error: message })).toMatchObject({ error: expected });
+    }
+  });
+
+  it("redacts a secret-bearing URL value", () => {
+    const payload = buildPayload({
+      ...ERROR,
+      error: "WEBHOOK_URL=https://user:pass@host/hook rejected",
+    });
+    expect(JSON.stringify(payload)).not.toContain("user:pass@host");
+  });
 });
 
 describe("notify — delivery (SPEC §7.7)", () => {
