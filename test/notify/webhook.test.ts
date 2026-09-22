@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildPayload, notify } from "../../src/notify/webhook";
 import type { NotifyOptions, RunReportLike } from "../../src/notify/webhook";
@@ -193,6 +193,54 @@ describe("notify — delivery (SPEC §7.7)", () => {
     };
     await notify(OPTIONS, SUCCESS, { fetch });
     expect(sawSignal).toBe(true);
+  });
+});
+
+describe("notify — local logging of failure (SPEC §7.4, §7.7)", () => {
+  // The webhook cannot report its own failure, so it must be logged locally.
+  // Workers Logs persist by default, which is why the logged text must be
+  // sanitised: a token here is a durable leak (PLAN R9).
+  it("logs a sanitised failure when the transport throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetch: FetchLike = () => Promise.reject(new Error("ECONNREFUSED at https://u:p@host"));
+    const result = await notify({ ...OPTIONS, webhookToken: "tok123" }, SUCCESS, { fetch });
+
+    expect(result.ok).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("tok123");
+    // The URL may carry a token, so only the host may appear.
+    expect(logged).not.toContain("u:p@host");
+    expect(logged).toContain("hooks.example.test");
+    warn.mockRestore();
+  });
+
+  it("logs a sanitised failure on a non-2xx response", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetch: FetchLike = () => Promise.resolve(new Response("nope", { status: 503 }));
+    await notify({ ...OPTIONS, webhookToken: "tok123" }, SUCCESS, { fetch });
+
+    expect(warn).toHaveBeenCalled();
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("tok123");
+    expect(logged).toContain("503");
+    warn.mockRestore();
+  });
+
+  it("does not log on a successful delivery", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { fetch } = capture();
+    await notify(OPTIONS, SUCCESS, { fetch });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("buildPayload — absent fields", () => {
+  it("omits the internal desired field from the success payload", () => {
+    // `desired` is an internal decision value; SPEC §7.3 does not carry it.
+    const payload = buildPayload(SUCCESS);
+    expect(payload).not.toHaveProperty("desired");
   });
 });
 

@@ -194,13 +194,34 @@ export async function notify(
       body,
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return { ok: response.status >= 200 && response.status < 300 };
-  } catch {
-    // Deliberately swallowed: the caller must not be able to distinguish a
-    // webhook failure from a webhook success except by this boolean. The
-    // failure is logged by the caller with `stage: "webhook"`.
+    if (response.status >= 200 && response.status < 300) return { ok: true };
+    // The webhook cannot report its own failure, so it is logged locally. The
+    // message is built from the host and a status code only: the URL may carry a
+    // token, and Workers Logs persist by default (SPEC §7.4, §7.7, PLAN R9).
+    logWebhookFailure(options.webhookUrl, `HTTP ${response.status}`);
+    return { ok: false };
+  } catch (cause) {
+    // Deliberately swallowed rather than propagated: the caller must not be
+    // able to distinguish a webhook failure from a webhook success except by
+    // this boolean. The failure is logged locally and classified under
+    // `stage: "webhook"` by the caller.
+    logWebhookFailure(
+      options.webhookUrl,
+      cause instanceof Error ? cause.name : "transport failure",
+    );
     return { ok: false };
   }
+}
+
+/**
+ * Log a webhook failure locally.
+ *
+ * Composed from the endpoint *host* and a short reason. The full URL is
+ * deliberately excluded because it may carry a token, and the token itself is
+ * never interpolated.
+ */
+function logWebhookFailure(url: string, reason: string): void {
+  console.warn(`[webhook] delivery to ${safeHost(url)} failed (${reason})`);
 }
 
 /**
