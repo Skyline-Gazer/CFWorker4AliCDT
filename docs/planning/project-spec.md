@@ -1,9 +1,12 @@
 # CFWorker4AliCDT — Project Specification
 
-> Status: **APPROVED by owner (2026-09-20).** Companion to [project-plan.md](./project-plan.md).
-> Amendment: `STOPPED_MODE` defaults to `KeepCharging` (owner decision, §6.4).
-> Normative language: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+> Status: **REVISION 2 — companion to [project-plan.md](./project-plan.md).**
+> Supersedes Revision 1. Normative language: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 > Where this SPEC and the PLAN disagree, the SPEC governs behaviour.
+>
+> Amendment carried forward: `STOPPED_MODE` defaults to `KeepCharging` (owner decision, §6.4).
+> Revision 2 adds §7–§10 (webhook cadence, HTTP surface, auth, D1 history) and revises
+> §2, §12, §13. The failure semantics in §3–§6 and §11 are unchanged from Revision 1.
 
 ## 1. Scope
 
@@ -21,6 +24,7 @@ internal structure beyond what is needed to make behaviour testable.
 | `ALIYUN_ACCESS_KEY_SECRET` | Yes | Alibaba Cloud AccessKey secret. Raw value is the V3 signing key. |
 | `WEBHOOK_URL` | Yes | Absolute `https://` URL receiving run reports. |
 | `WEBHOOK_TOKEN` | No | If present, sent as `Authorization: Bearer <token>`. |
+| `ADMIN_TOKEN` | Yes | Dashboard and API credential. See §8. |
 
 Declared in the Wrangler configuration under `secrets.required`, so a deploy with a
 missing secret **fails** rather than shipping a Worker that cannot authenticate.
@@ -36,13 +40,21 @@ missing secret **fails** rather than shipping a Worker that cannot authenticate.
 | `BUSINESS_REGION_ID` | No | unset | If set, CDT `BusinessRegionId`. See §5.3. |
 | `SIGNATURE_VERSION` | No | `v3` | `v3` or `v2`. See §4. |
 | `STOPPED_MODE` | No | `KeepCharging` | `StopCharging` or `KeepCharging`. See §6.4. |
+| `ADMIN_USER` | No | `admin` | Dashboard username. See §8. |
 
-### 2.3 Validation
+### 2.3 D1 binding
+
+| Binding | Required | Description |
+| --- | --- | --- |
+| `TRAFFIC_DB` | Yes | D1 database holding monitoring history (§9). |
+
+### 2.4 Validation
 
 Configuration is validated **before any network call**. A failure here:
 
 - performs **no** ECS mutation,
 - dispatches an error webhook with `stage: "config"`,
+- records no history row,
 - causes the run to exit.
 
 Validation rules:
@@ -56,6 +68,7 @@ Validation rules:
 | `REGION_ID` or `ECS_INSTANCE_ID` absent | config error |
 | `SIGNATURE_VERSION` not in {`v2`, `v3`} | config error |
 | `STOPPED_MODE` not in {`StopCharging`, `KeepCharging`} | config error |
+| `ADMIN_TOKEN` absent | config error on the **HTTP** path (fail closed, §8.3); the scheduled path MUST NOT require it |
 
 Validation **MUST NOT** echo the offending value when that value came from a secret
 binding. Non-secret bindings MAY be named in the error.
@@ -111,6 +124,18 @@ a code branch scattered across call sites: there is exactly one `callRpc()` boun
 `CanonicalHeaders` entries are `lowercase(name) + ":" + trim(value) + "\n"`, sorted
 ascending by lowercase name; `SignedHeaders` is that same set of names joined by `;`.
 
+**`x-acs-content-sha256` IS a signed header.** An earlier research probe suggested
+otherwise; that probe was malformed (form parameters placed in the body instead of the
+query string). The published example and the P1 implementation agree, and the
+conclusion MUST NOT be reverted.
+
+**`content-type` is signed only when present.** It is not added unconditionally;
+doing so changes `SignedHeaders` and therefore the signature.
+
+**`Action` and `Version` are sent as form parameters as well as signed headers.** The
+server resolves the operation from the payload. A headers-only implementation is
+incorrect.
+
 ### 4.3 V2 request construction (fallback)
 
 `Signature = Base64(HMAC-SHA1(AccessKeySecret + "&", UTF8(StringToSign)))` where
@@ -141,7 +166,12 @@ Both official vectors MUST be pinned as deterministic, offline tests:
 | V3 — `POST /`, `host=ecs.cn-shanghai.aliyuncs.com`, `x-acs-action=RunInstances`, `x-acs-version=2014-05-26`, `x-acs-date=2023-10-26T10:22:32Z`, `x-acs-signature-nonce=3156853299f313e23d1673dc12e1703d`, body `ImageId=win2019_1809_x64_dtc_zh-cn_40G_alibase_20230811.vhd&RegionId=cn-shanghai`, secret `YourAccessKeySecret` | `HashedCanonicalRequest = 7ea06492da5221eba5297e897ce16e55f964061054b7695beedaac1145b1e259`<br>`Signature = 06563a9e1b43f5dfe96b81484da74bceab24a1d853912eee15083a6f0f3283c0` |
 | V2 — `GET /`, `AccessKeyId=testid`, `Action=DescribeDedicatedHosts`, `Format=JSON`, `RegionId=cn-beijing`, `SignatureMethod=HMAC-SHA1`, `SignatureNonce=edb2b34af0af9a6d14deaf7c1a5315eb`, `SignatureVersion=1.0`, `Timestamp=2023-03-13T08:34:30Z`, `Version=2014-05-26`, secret `testsecret` | `Signature = 9NaGiOspFP5UPcwX8Iwt2YJXXuk=` |
 
-Both fixtures were verified byte-exact against `crypto.subtle` during research.
+Both fixtures reproduce byte-exact and are implemented in P1 (`test/aliyun/signing.test.ts`).
+
+A wire-level test MUST verify the produced signature with an implementation that does
+not share the production helper code, so that a shared mistake cannot pass unnoticed.
+That test MUST discriminate: pinning the payload hash to the empty-body constant MUST
+make it fail.
 
 ### 4.6 Error classification
 
@@ -155,9 +185,13 @@ Both fixtures were verified byte-exact against `crypto.subtle` during research.
 | HTTP 2xx with API error code | api | **No** |
 | HTTP 2xx with unparseable body | parse | **No** |
 
-Retries MUST be bounded by a small constant and MUST use backoff. An unbounded or
-long retry loop is prohibited: the Cron invocation has a finite CPU and duration
-budget (§11).
+**HTTP status is authoritative for classification.** A 4xx MUST NOT be reclassified as
+retryable merely because its body carries a service-specific `Code`. An earlier draft
+did exactly that and would have burned the Cron budget on calls that cannot succeed.
+
+Retries MUST be bounded by a small constant (currently 2 attempts) and MUST use
+backoff. An unbounded or long retry loop is prohibited: the Cron invocation has a
+finite CPU and duration budget (§11).
 
 ### 4.7 Success determination
 
@@ -165,6 +199,10 @@ A response is successful only if the transport succeeded, the body parsed, and t
 API reported success. Alibaba signals success either by a 2xx with a usable body or by
 a `Code` value of `ok`, `200`, or `success`. Any other `Code` is an error and its
 `Message` MUST be surfaced (sanitised).
+
+An empty or unparseable body on a 2xx is a **parse failure**, never an empty success.
+Treating it as `{}` would surface as zero traffic and trip the threshold against
+unknown state.
 
 ## 5. CDT monitoring
 
@@ -193,7 +231,7 @@ $$\text{trafficBytes} = \sum_{i} \texttt{TrafficDetails}[i].\texttt{Traffic}$$
 All entries are summed. When `BUSINESS_REGION_ID` is configured it is applied as a
 server-side request parameter, not as a client-side filter, so that the sum always
 reflects what the API returned. The per-region breakdown SHOULD be included in the
-webhook payload so the summation scope remains auditable (PLAN Q1).
+webhook payload and dashboard so the summation scope remains auditable (PLAN Q1).
 
 There is **no pagination**. This replaces the originating brief's pagination
 requirement; multi-entry summation over `TrafficDetails` is the substitute test
@@ -263,6 +301,11 @@ Desired state:
 
 Comparison is on the boundary: exactly at the threshold means **stopped**. Tests MUST
 cover `threshold − ε`, exactly `threshold`, and `threshold + ε`.
+
+`decision()` is a **pure function**. It MUST NOT perform network I/O, read D1, or
+dispatch a webhook. Its inputs are the traffic total, the threshold, and the observed
+ECS status; its output is the desired state, the chosen action, and a reason. It MUST
+be testable with no mocks.
 
 ### 6.3 Action matrix
 
@@ -334,14 +377,13 @@ changing `STOPPED_MODE` to `StopCharging` does so with the consequences visible:
 - **Silent-ignore caveat still applies** — neither risk produces an error at stop time.
   Both are discovered only at restart, which is the worst possible moment.
 
-`ForceStop` is `false` and MUST NOT be made configurable to `true` in the initial
-release. Force-stopping risks filesystem corruption and is exactly the kind of
-destructive shortcut this project exists to avoid.
-
 ### 6.5 Hierarchy of authority
 
 CDT failure and ECS describe failure both abort before any mutation. A failure to
 *observe* is never resolved by *acting*.
+
+**Alibaba Cloud is the authority for ECS state.** D1 history (§9) and the webhook (§7)
+are observational and are never inputs to a control decision.
 
 ## 7. Webhook reporting
 
@@ -354,8 +396,12 @@ dispatch MUST NOT be able to throw into the control path.
 
 ### 7.2 Cadence
 
-A webhook is sent on **every** scheduled run — success, no-op, or error — per the
-owner's decision.
+A webhook is **attempted on every scheduled execution** — including `none-running`,
+`none-stopped`, `start`, `stop`, and error runs. There is no `NOTIFY_ON_NOOP` in v1;
+suppressing no-op notifications is not configurable.
+
+Webhook dispatch is non-blocking with respect to the control result: the outcome is
+already fixed before dispatch begins.
 
 ### 7.3 Success payload
 
@@ -403,18 +449,19 @@ immediate follow-up describe and MAY legitimately be `starting` or `stopping`;
 ```
 
 `stage` ∈ {`config`, `cdt-query`, `ecs-describe`, `ecs-start`, `ecs-stop`,
-`webhook`, `unexpected`}.
+`webhook`, `unexpected`}. The HTTP surface adds no new stages; failures on the manual
+path are returned as HTTP responses, not as webhook dispatches.
 
 For `stage: "webhook"` the webhook cannot report its own failure; the failure is
 logged locally and the payload is not sent.
 
 ### 7.5 Secret hygiene
 
-No AccessKey ID, AccessKey secret, webhook token, `Authorization` header, or
-secret-bearing URL is ever included in a payload, a log line, or an error string. When
-`stage` is `config` or `webhook`, messages are composed from literals rather than
-interpolating binding values. Error text originating from a remote service is
-sanitised before dispatch.
+No AccessKey ID, AccessKey secret, webhook token, `ADMIN_TOKEN`, `Authorization`
+header, or secret-bearing URL is ever included in a payload, a log line, a rendered
+HTML document, a D1 row, or an error string. When `stage` is `config` or `webhook`,
+messages are composed from literals rather than interpolating binding values. Error
+text originating from a remote service is sanitised before dispatch.
 
 ### 7.6 Authentication
 
@@ -427,52 +474,216 @@ When `WEBHOOK_TOKEN` is set, each request carries
 non-2xx status or thrown error is a webhook failure: it is logged, classified under
 `stage: "webhook"`, and has no other effect.
 
-## 8. HTTP surface
+## 8. HTTP surface and authentication
 
-`GET /health` returns `200` with a small JSON body indicating liveness. It performs no
-privileged work, reads no Alibaba API, mutates nothing, and reveals no configuration
-beyond liveness.
+### 8.1 Routes
 
-Every other path and method is refused. **No HTTP route can start, stop, reboot, or
-otherwise control an ECS instance.** Control exists only on the Cron Trigger path,
-which is not reachable over HTTP.
+| Method | Path | Auth | Behaviour |
+| --- | --- | --- | --- |
+| `GET` | `/health` | **Public** | `200` with a small JSON liveness body. |
+| `GET` | `/` | Required | Server-rendered dashboard (§8.4). |
+| `GET` | `/api/history` | Required | Bounded monitoring history (§9.5). |
+| `POST` | `/api/query` | Required | Live read-only query (§8.5). |
 
-## 9. Logging
+Every other path MUST return `404`. A known path with an unsupported method MUST
+return `405`.
 
-Every run logs a structured start, the observed traffic in bytes and GB, the observed
-and desired states, the chosen action, the resulting state, and the duration. Errors
-log the stage and a sanitised message.
+`GET /health` performs no privileged work, reads no Alibaba API, mutates nothing, reads
+no D1 row, and reveals no configuration beyond liveness.
 
-Logs MUST NOT contain credentials, tokens, `Authorization` headers, or full URLs
-carrying secrets. Workers Logs are persisted by default, so this is a correctness
-requirement, not a preference.
+### 8.2 Authentication model
 
-## 10. Run pipeline
+| Mechanism | Use |
+| --- | --- |
+| HTTP Basic (`ADMIN_USER`:`ADMIN_TOKEN`) | Browser access to `/` and `/api/*`. |
+| Bearer (`ADMIN_TOKEN`) | Non-browser API clients. |
 
-```
-1. Validate configuration.            Failure ⇒ webhook(config), exit. No mutation.
-2. Query CDT.                         Failure/invalid ⇒ webhook(cdt-query), exit. No mutation.
-3. Describe the instance.             Failure ⇒ webhook(ecs-describe), exit. No mutation.
-4. Decide desired state from §6.2.
-5. If action is fail-safe:            webhook(error), exit. No mutation.
-6. If action is none-*:               no mutation.
-7. Otherwise issue exactly one mutation (start or stop).
-   Mutation failure ⇒ webhook(ecs-start|ecs-stop), exit.
-8. One immediate follow-up describe for ecsStatusAfter.
-   A failure here does not undo the mutation and is reported as observed.
-9. Dispatch the success webhook.      Failure ⇒ log only. Never affects control.
-```
+- `ADMIN_USER` defaults to `admin` when unset or empty.
+- `ADMIN_TOKEN` is a Workers Secret. It MUST NOT be logged, rendered, or returned.
+- Credential comparison MUST be timing-safe. Comparison MUST NOT short-circuit on the
+  first differing character.
+- On failure the Worker MUST respond `401` with a
+  `WWW-Authenticate: Basic realm="..."` challenge and MUST NOT disclose whether the
+  username or the password was wrong.
+- A malformed `Authorization` header (unparseable Base64, no `:` separator,
+  unrecognised scheme) MUST be treated as unauthenticated, never as authenticated.
+- The `Authorization` header MUST NOT be echoed in any response body or log line.
 
-Any unhandled error maps to `stage: "unexpected"`, dispatches an error webhook, and
-performs no mutation.
+### 8.3 Fail closed on missing `ADMIN_TOKEN`
+
+If `ADMIN_TOKEN` is absent or empty, every protected route MUST deny access. The Worker
+MUST NOT serve the dashboard or API unauthenticated, and MUST NOT fall back to an
+empty or default token. This is a deliberate fail-closed choice: an operator who
+forgets to set the secret gets a locked door, not an open one.
+
+### 8.4 Dashboard content
+
+The dashboard is served from the **same** Worker as server-rendered HTML. No frontend
+framework, no build step, and no separate deployment.
+
+It MUST display at least:
+
+| Field |
+| --- |
+| Current CDT traffic (GB) |
+| Configured threshold (GB) |
+| Usage percentage |
+| Remaining traffic before threshold |
+| Current ECS state |
+| Desired ECS state |
+| Last decision and its reason |
+| Last action |
+| ECS state before |
+| ECS state after |
+| Last scheduled execution time |
+| Execution success/failure |
+| Webhook attempt result |
+| History persistence result, where available in the current response |
+| Execution duration |
+
+All dynamic values MUST be HTML-escaped on render. The dashboard performs no
+privileged operation merely by being rendered, and MUST NOT embed a secret, token, or
+credential-bearing URL in the document.
+
+### 8.5 Manual query — strictly read-only
+
+`POST /api/query` performs:
+
+1. a live CDT traffic query,
+2. a live ECS `DescribeInstances`,
+3. `decision()`.
+
+It then returns those results. **It MUST NOT invoke `StartInstance` or
+`StopInstance`.** Both operations MUST be unreachable from every HTTP route; a test
+MUST assert that neither was called.
+
+The endpoint exists to power "Query now" / "Refresh" on the dashboard, so an operator
+can observe current state without waiting for the next Cron tick. It deliberately stops
+one step before acting.
+
+**There is no `POST /start`, `/stop`, `/run-control`, or `/execute-control`, and none
+may be added in v1.** The Cron Trigger is the only ECS mutation authority in v1.
+
+A manual query MUST NOT write a history row: history records **scheduled executions**,
+and a manual read MUST NOT be able to masquerade as a control run (§9.2).
+
+## 9. D1 monitoring history
+
+### 9.1 Role
+
+D1 is **observational history**. Alibaba Cloud remains the authority for ECS state.
+No control decision may read from D1, and a D1 failure MUST NOT alter a control
+outcome.
+
+### 9.2 Trigger semantics
+
+Row identity MUST distinguish how the run was triggered. Only **scheduled** executions
+produce rows in v1; manual queries (§8.5) do not. This keeps the history an accurate
+record of *automatic* decisions and prevents a manual read from appearing as a control
+run.
+
+### 9.3 Schema
+
+Binding `TRAFFIC_DB`, table `traffic_checks`, introduced by a versioned migration:
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | INTEGER PK AUTOINCREMENT | Insertion order; used as the ordering tiebreaker. |
+| `checked_at` | TEXT NOT NULL | ISO 8601 UTC. |
+| `trigger` | TEXT NOT NULL | e.g. `scheduled`. |
+| `status` | TEXT NOT NULL | `success` or `error`. |
+| `traffic_gb` | REAL | Null when traffic could not be established. |
+| `threshold_gb` | REAL NOT NULL | |
+| `usage_percent` | REAL | Derived; null when traffic is unknown. |
+| `remaining_gb` | REAL | Derived; null when traffic is unknown. |
+| `ecs_status_before` | TEXT | Normalised status, or null when not observed. |
+| `desired_ecs_state` | TEXT | |
+| `action` | TEXT | |
+| `ecs_status_after` | TEXT | Null when no mutation or no follow-up describe. |
+| `control_ok` | INTEGER | Boolean. |
+| `webhook_attempted` | INTEGER | Boolean. |
+| `webhook_ok` | INTEGER | Boolean; null when not attempted. |
+| `error_stage` | TEXT | Null on success. |
+| `error_message` | TEXT | **Sanitised.** Null on success. |
+| `duration_ms` | INTEGER | |
+
+Indexed on `checked_at` to support bounded reads.
+
+**Unknown traffic MUST be stored as NULL, not as `0`.** §5.4's invariant applies to
+persistence as well: a row MUST NOT record a fabricated zero for a value that could
+not be established.
+
+### 9.4 Prohibited content
+
+A row MUST NOT contain:
+
+- `ALIYUN_ACCESS_KEY_ID` or `ALIYUN_ACCESS_KEY_SECRET`
+- `ADMIN_TOKEN` or `WEBHOOK_TOKEN`
+- any secret-bearing URL
+- a raw credential-bearing Alibaba request or response
+
+Error messages MUST be sanitised before insertion. `stage` MUST be one of the
+enumerated values in §7.4; unrecognised internal errors map to `unexpected`.
+
+### 9.5 Read API
+
+`GET /api/history`:
+
+- requires authentication (§8.2),
+- returns rows **newest first**,
+- orders deterministically by `(checked_at DESC, id DESC)`,
+- applies a bounded limit with a hard maximum; an oversized or malformed `limit`
+  parameter MUST be clamped rather than honoured,
+- is read-only: it MUST NOT write, migrate, or mutate anything,
+- returns JSON; it does not render HTML.
+
+### 9.6 Failure isolation
+
+A D1 write failure MUST NOT reverse, alter, or block the ECS control result. It MUST
+be recorded in the **in-memory execution report** for the current run and logged, and
+it MUST NOT throw into the control path.
+
+> **A row MUST NOT claim its own `INSERT` succeeded before the `INSERT` occurs.**
+> Persistence success (`storageOk`) is therefore represented as a field of the
+> in-memory execution report, **not** as a value written by the very insert that would
+> have to describe itself.
+
+A failure to *read* history (dashboard or `/api/history`) MUST NOT affect the
+scheduled control path, which never reads history.
+
+### 9.7 Retention
+
+Rows accumulate at the Cron cadence (~144/day). Per owner decision (PLAN **Q5**,
+resolved 2026-09-22), v1 retains them **indefinitely** and performs no automatic
+deletion. Pruning is an explicit operations task if unbounded growth later becomes a
+concern.
+
+## 10. Manual query vs scheduled control
+
+The distinction is normative and MUST be visible in code and tests:
+
+| | `POST /api/query` — manual | Cron — scheduled |
+| --- | --- | --- |
+| Auth | Required | Not applicable |
+| CDT query | Yes | Yes |
+| ECS describe | Yes | Yes |
+| `decision()` | Yes | Yes |
+| ECS mutation | **Never** | At most one, per §6.3 |
+| Webhook dispatch | **No** | Every execution (§7.2) |
+| D1 write | **No** | Every execution (§9.2) |
+| Failure surface | HTTP response | Webhook + D1 + log |
+
+The two paths share the read and decide logic but diverge strictly before any act. The
+manual path is not a weakened or bypassed version of the scheduled path; it is a
+different path that stops earlier.
 
 ## 11. Runtime constraints
 
 | Constraint | Consequence |
 | --- | --- |
-| Cron CPU: 10 ms free / 30 s paid (intervals < 1 hour) | Retries are bounded; no busy-waiting; no long-polling. |
-| Cron duration: 15 min | Not a binding constraint for this design, but the Worker stays short-lived and never waits for a terminal ECS state. |
-| Subrequests: 50 free / 10,000 paid | The run uses a small, bounded number of subrequests. |
+| Cron CPU: 10 ms free / 30 s paid (intervals < 1 hour) | Retries are bounded; no busy-waiting; no long-polling. D1 writes add CPU on the scheduled path; measure and budget. |
+| Cron duration: 15 min | The Worker stays short-lived and never waits for a terminal ECS state. |
+| Subrequests: 50 free / 10,000 paid | The run uses a small, bounded number of subrequests; the dashboard render performs none. |
 | Cron expressions: 5 fields, UTC, `1 = Sunday … 7 = Saturday` | `*/10 * * * *` is used and is unambiguous. |
 | Memory: 128 MB | Responses are small; no buffering of large bodies. |
 | Simultaneous connections: 6 | Calls are sequential, not fanned out. |
@@ -482,22 +693,30 @@ CPU usage is measured (risk R8).
 
 ## 12. Testing requirements
 
-All tests are offline and deterministic. No test performs a live Alibaba Cloud
-mutation, and no test requires network access. All network I/O is mocked.
+All tests are offline and deterministic. No test performs a live Alibaba Cloud mutation
+and no test requires network access. All network I/O is mocked. **The existing P1 test
+baseline (144 tests) is retained and MUST NOT be reduced.**
 
 | Area | Required cases |
 | --- | --- |
-| Signing | Both official vectors byte-exact; encoding of space, `*`, `~`, `!`, `'`, `(`, `)`; ascending sort with `Signature` excluded; canonical header ordering; nonce uniqueness; timestamp format |
-| Transport | Success; API error code; HTTP ≥ 500; HTTP 429; transport throw; retry-then-success; retry exhaustion; 4xx not retried |
+| Signing | Both official vectors byte-exact; encoding of space, `*`, `~`, `!`, `'`, `(`, `)`; ascending sort with `Signature` excluded; canonical header ordering; nonce uniqueness; timestamp format; wire-level verification with an independent implementation that discriminates |
+| Transport | Success; API error code; HTTP ≥ 500; HTTP 429; transport throw; retry-then-success; retry exhaustion; 4xx not retried; status-authoritative classification |
 | CDT | Multi-entry summation; single entry; `TrafficDetails` absent / null / non-array / empty; `Traffic` absent / null / `""` / non-numeric / `NaN` / negative; API error; malformed body; `BusinessRegionId` sent only when configured |
 | Units | Byte→GB conversion; `threshold − ε` / `threshold` / `threshold + ε` |
 | ECS | All five statuses; unknown status; instance absent; both mutations; each failure path; asynchronous post-state |
-| Decision | Full action matrix in §6.3, including every `fail-safe` row |
+| Decision | Full action matrix in §6.3, including every `fail-safe` row; purity (no I/O) |
 | Idempotency | No mutation when observed already equals desired, including transitional forms |
-| Webhook | Success payload; each error stage; bearer present/absent; non-2xx; thrown error; control flow unaffected |
-| Config | Each validation failure in §2.3 |
-| HTTP | `GET /health` succeeds and is inert; all other paths/methods refused |
-| Redaction | Secrets never appear in logs, payloads, or error strings |
+| Webhook | Success payload; each error stage; bearer present/absent; non-2xx; thrown error; control flow unaffected; attempted on every scheduled execution |
+| Config | Each validation failure in §2.4 |
+| HTTP | `GET /health` succeeds and is inert; unknown route ⇒ 404; wrong method ⇒ 405 |
+| **Auth** | Valid Basic; invalid Basic; malformed Basic; missing `ADMIN_TOKEN` fails closed; Bearer path; timing-safe comparison does not short-circuit |
+| **Manual query** | CDT queried; ECS described; decision returned; **`StartInstance` never called**; **`StopInstance` never called**; no D1 write; no webhook |
+| **D1** | Successful insert; bounded history; newest-first ordering with deterministic tiebreaker; unknown traffic stored as NULL not 0; sanitised errors; no secret stored; storage failure does not alter the control decision |
+| **Dashboard** | Render contract: required fields present; HTML-escaped output; no secret echoed |
+| **Redaction** | Secrets never appear in logs, payloads, rendered HTML, D1 rows, or error strings |
+
+Dashboard tests are **semantic/render-contract tests**. Pixel snapshots and assertions
+on CSS literals or layout are prohibited (PLAN §8.3 D2).
 
 Tests MUST assert observable behaviour. Tests that assert implementation details —
 field copies, mock echoes, source text, incidental defaults — MUST NOT be written, and
@@ -511,20 +730,28 @@ any existing test of that kind MUST be removed rather than re-pinned.
 | A2 | Missing/invalid traffic never becomes `0` | CDT validation tests |
 | A3 | Desired equals observed ⇒ no mutation | Idempotency tests |
 | A4 | Webhook failure cannot alter ECS control | Webhook isolation tests |
-| A5 | No secret in logs, payloads, or errors | Redaction tests |
-| A6 | Only `GET /health` is served; no control endpoint | HTTP tests |
+| A5 | No secret in logs, payloads, HTML, D1, or errors | Redaction tests |
+| A6 | No HTTP route performs a mutation; `/api/query` is read-only | Manual-query + HTTP tests |
 | A7 | Both official signature vectors reproduce exactly | Signing tests |
 | A8 | Boundary semantics: `< threshold` running, `>= threshold` stopped | Decision tests |
 | A9 | Every `fail-safe` row performs no mutation | Decision + ECS tests |
 | A10 | CI passes with no credentials and no live calls | CI configuration |
+| A11 | D1 write failure does not alter the control outcome | D1 isolation tests |
+| A12 | Protected routes deny unauthenticated and malformed requests | Auth tests |
+| A13 | `decision()` is pure and unit-testable without mocks | Decision purity tests |
 
 ## 14. Open questions
 
-Q1, Q3, and Q4 from the PLAN remain open and are resolved by configuration defaults
-rather than by assumptions baked into code: summation scope (Q1), region identifier
-namespace (Q3), Cloudflare plan (Q4). Each has a stated default in §2.2, §5.3, and
-§6.4, so implementation is unblocked while the owner's answers can still change
-behaviour without code changes.
+Q1 and Q3 from the PLAN remain open and are resolved by configuration defaults rather
+than by assumptions baked into code: summation scope (Q1) and region identifier
+namespace (Q3). **Q4 (Cloudflare plan), Q5 (history retention), and Q6 (repository
+visibility / branch protection)** are resolved by owner decision (2026-09-22): the
+project stays on the Workers Free plan initially and measures CPU before any upgrade
+(§11, risk R8); `traffic_checks` is retained indefinitely with no automatic deletion
+(§9.7); and the repository is public, so the `main` protection ruleset is enabled
+(PLAN §14.1, risk R11). Each resolved item has a stated default in the PLAN, so
+implementation is unblocked while any remaining owner answer can still change behaviour
+without code changes.
 
-**Q2 (`StoppedMode`) is resolved** by owner decision: default `KeepCharging`, configurable,
-with `StopCharging` implications documented in §6.4.
+**Q2 (`StoppedMode`) is resolved** by owner decision: default `KeepCharging`,
+configurable, with `StopCharging` implications documented in §6.4.
