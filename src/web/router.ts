@@ -19,7 +19,7 @@
 
 import { authenticate, basicChallenge } from "./auth";
 import type { AuthConfig } from "./auth";
-import { redact } from "../notify/webhook";
+import { redact } from "../redact";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {

@@ -20,7 +20,7 @@
 import type { EcsStatus, InstanceObservation, TrafficReading } from "../aliyun/api";
 import { TrafficUnavailableError, trafficBytesToDecimalGb } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
-import { redact } from "../notify/webhook";
+import { redact } from "../redact";
 import { decide } from "../monitor/decision";
 import type { DecisionAction } from "../monitor/decision";
 import type { ErrorStage } from "../monitor/execute";

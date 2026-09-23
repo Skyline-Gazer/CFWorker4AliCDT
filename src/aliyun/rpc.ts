@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { redact as redactText } from "../redact";
+
 import type { SignatureVersion, SignRequest } from "./signing";
 import { percentEncode } from "./encoding";
 import { signRequest } from "./signing";
@@ -122,50 +124,27 @@ const THROTTLE_CODES: Record<string, true> = {
 };
 
 /**
- * Keys whose values are credentials or credential proxies. Removed before any
- * remote text reaches a log line or a webhook payload.
- */
-const SECRET_KEYS: readonly RegExp[] = [
-  /accesskey ?id/i,
-  /accesskey ?secret/i,
-  /authorization/i,
-  /signature/i,
-  /securitytoken/i,
-  /security ?token/i,
-  /token/i,
-  /credential/i,
-];
-
-const REDACTED = "[REDACTED]";
-
-/**
  * Strip credential-shaped content from remote text.
  *
- * Remote messages are attacker-adjacent in the sense that they are outside our
- * control, and Alibaba echoes request parameters back in validation errors. A
- * message that echoed a signed URL would carry an `AccessKeyId` and a
- * `Signature`.
+ * **Delegates to the project's single redaction boundary** rather than
+ * reimplementing the rules. This module previously carried its own, weaker copy,
+ * and the divergence was not cosmetic.
+ *
+ * `RpcError.message` is built from this function's output, and downstream
+ * destinations — the webhook payload and the D1 write path — redact that text
+ * *again* with the stronger implementation. The weaker copy here could consume a
+ * scheme word as if it were the value and leave the real credential behind:
+ *
+ *   raw    `Authorization: Bearer tok123 rejected`
+ *   here   `Authorization: [REDACTED] tok123 rejected`   <- "Bearer" eaten
+ *   stored `Authorization: [REDACTED]] tok123 rejected`  <- token reached D1
+ *
+ * Two lists could always disagree again; one boundary cannot. The acceptance
+ * tests for this behaviour live in `test/aliyun/redact.test.ts`, including
+ * idempotence, which is what makes a second pass safe.
  */
 export function redact(text: string): string {
-  let out = text;
-  // Secret-named keys, in either `key=value` or `"key":"value"` form. Remote
-  // messages echo request parameters, so a validation error can carry a signed
-  // URL back to us. Only the value is replaced — matching on the redaction
-  // placeholder itself would consume the surrounding JSON quoting.
-  for (const pattern of SECRET_KEYS) {
-    const key = pattern.source;
-    // The separator may be preceded by the closing quote of a JSON key
-    // (`"AccessKeySecret":"…"`), so the quote is consumed as part of the
-    // prefix. The *value* is matched whole, opening quote included, to keep the
-    // surrounding notation intact.
-    out = out.replace(
-      new RegExp(`(\\b(?:${key})\\b["']?\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^&\\s,}]+)`, "gi"),
-      `$1${REDACTED}`,
-    );
-  }
-  // Long opaque tokens with no key context.
-  out = out.replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, REDACTED);
-  return out;
+  return redactText(text);
 }
 
 /**
