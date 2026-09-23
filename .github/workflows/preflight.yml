@@ -33,6 +33,13 @@ name: Preflight deploy (read-only verification)
 #    job, and RELEASE is a separate, explicitly authorized dispatch. Nothing here
 #    chains into it.
 #
+# TRUST BOUNDARY
+# Both deployment workflows target the `production` GitHub Environment. It must
+# require an owner reviewer, allow deployments only from `main`, and hold the
+# Cloudflare deployment secrets. The workflow-level ref guard is supplementary:
+# because workflow code comes from the selected ref, the Environment's branch
+# restriction is the authoritative boundary.
+#
 # ORDER: migrations run before the deploy, because the schema must exist before a
 # Worker version that reads it is live. The D1 database is created by the owner
 # before this runs; see docs/operations/deployment.md.
@@ -57,17 +64,14 @@ jobs:
     name: Preflight — first deploy, Cron disabled
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Deliberately NOT the protected `production` environment. Preflight holds no
-    # scheduled authority; requiring an approval for it would train the owner to
-    # approve this stage reflexively, which is exactly the habit that must not
-    # carry over to RELEASE.
-    #
-    # Consequence for credential placement: because this job does not attach the
-    # environment, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and
-    # `D1_DATABASE_ID` must be **repository-level** values, not environment-level
-    # ones. A value stored only on the `production` environment would be invisible
-    # here and this deploy would fail with empty credentials.
+    environment: production
     steps:
+      - name: Guard deployment ref
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Deployment workflows may run only from refs/heads/main."
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -84,24 +88,23 @@ jobs:
       - name: Validate
         run: npm run validate
 
-      # Fails closed if the credentials the preflight deploy needs are not visible at
-      # the repository level. PRE-FLIGHT deliberately does not attach the
-      # `production` environment, so a value stored only there would be invisible
-      # and this job would fail later with a less actionable error.
+      # Fail before migration or deployment if the Environment credentials or
+      # repository variables needed by this run are unavailable.
       #
       # It also fails closed if a required application runtime variable is absent.
       # `loadConfig()` requires REGION_ID and ECS_INSTANCE_ID, so a deployment that
       # omitted them would succeed and then fail at the first request — the worst
       # moment to discover a missing binding. Failing here means the deploy never
       # starts. Only binding NAMES are reported; no value is ever printed.
-      - name: Verify repository-level credentials are visible
+      - name: Verify deployment credentials and repository variables are visible
         run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is empty in the production Environment."
+            exit 1
+          fi
           if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
-            echo "::error::CLOUDFLARE_ACCOUNT_ID is empty in this job."
-            echo "PRE-FLIGHT does not attach the production environment, so"
-            echo "CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and D1_DATABASE_ID must be"
-            echo "repository-level values. A value stored only on the environment is"
-            echo "invisible here. See docs/operations/deployment.md §3c."
+            echo "::error::CLOUDFLARE_ACCOUNT_ID is empty in the production Environment."
+            echo "Store it as an Environment secret. See docs/operations/deployment.md §3c."
             exit 1
           fi
           if [ -z "${D1_DATABASE_ID}" ]; then
@@ -118,7 +121,7 @@ jobs:
               exit 1
             fi
           done
-          echo "Repository-level credentials and required application variables are visible."
+          echo "Deployment credentials and required repository variables are visible."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

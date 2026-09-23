@@ -60,13 +60,33 @@ Three distinct classes exist, and conflating them causes real deployment defects
 | Class | Lives in | Set by | Examples |
 | --- | --- | --- | --- |
 | **Application runtime variables** | Generated Wrangler `vars` | GitHub **Variables** | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB` |
-| **Deployment-only values** | The resolver / workflow invocation | GitHub Variables, Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
+| **Deployment-only values** | The resolver / workflow invocation | Repository Variables, `production` Environment Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
 | **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / the dashboard | `ALIYUN_ACCESS_KEY_ID`, `ADMIN_TOKEN` |
 
 The difference that matters: **application runtime variables configure how the
 Worker behaves and are not credentials**, so they belong in GitHub Variables, not
 Secrets. **Worker Secrets are credentials**, are attached on Cloudflare, and are
 never routed through GitHub.
+
+### Deployment trust boundary
+
+Both `preflight.yml` and `release.yml` target the `production` GitHub Environment.
+The owner must configure that Environment with **required reviewers enabled** and
+deployment branches/tags **restricted to `main` only**. These are mandatory
+security settings, not optional hardening.
+
+Store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as **secrets on the
+`production` Environment**, not as repository secrets. Keep `REGION_ID`,
+`ECS_INSTANCE_ID`, `D1_DATABASE_ID`, and the optional application overrides as
+repository Variables; `WORKER_CUSTOM_DOMAIN` may also remain a repository
+Variable. `HTTP_EXPOSURE_MODE` remains an explicit RELEASE input.
+
+Both workflows also reject refs other than `refs/heads/main` before checkout or
+privileged steps. **This workflow-level ref guard is supplementary.** Workflow code
+comes from the selected ref, so the authoritative boundary is the `production`
+Environment's required reviewer, main-only deployment branch restriction, and
+Environment-scoped Cloudflare credentials. Repository tests can check the workflow
+files and this runbook; they cannot prove the live Environment is configured.
 
 ### 1b. Application runtime repository variables
 
@@ -279,26 +299,36 @@ seven. See §1a for how the three classes differ.
 | `D1_DATABASE_ID` | Variable | **Repository** | The remote `TRAFFIC_DB` UUID. |
 | `HTTP_EXPOSURE_MODE` | Dispatch input | — | `workers_dev` or `custom_domain`. **No default.** |
 | `WORKER_CUSTOM_DOMAIN` | Variable | **Repository** | Required only when the mode is `custom_domain`. |
-| `CLOUDFLARE_API_TOKEN` | Secret | **Repository** | Scoped to Workers + D1. |
-| `CLOUDFLARE_ACCOUNT_ID` | Secret | **Repository** | The account identifier. |
+| `CLOUDFLARE_API_TOKEN` | Secret | **`production` Environment** | Scoped to Workers + D1. |
+| `CLOUDFLARE_ACCOUNT_ID` | Secret | **`production` Environment** | The account identifier. |
 
-**These must be repository-level, not environment-level.** PRE-FLIGHT does not
-target the `production` environment, so a value stored only in that environment
-is invisible to it and the preflight deploy would fail with empty credentials.
-The protected-environment gate exists to require approval for **RELEASE**, not to
-hold the credentials both stages need.
+`D1_DATABASE_ID` and the application/runtime values must remain repository-level
+Variables. Cloudflare deployment credentials must be Environment-level Secrets so
+they are unavailable to jobs outside the protected deployment boundary. Both
+PRE-FLIGHT and RELEASE attach `environment: production` and receive those secrets
+only after the Environment's owner-side protections allow the job to proceed.
 
 `D1_DATABASE_ID` is a **variable, not a secret**: it is an identifier rather than a
 credential, and treating it as a secret would make it harder to audit without
 making it safer. It is nonetheless never committed.
 
-**Configure the protected environment** (GitHub settings; a workflow file cannot
-assert these):
+**Configure the protected Environment** (GitHub settings; workflow files cannot
+assert these live settings):
 
 1. **Settings → Environments → New environment**, named exactly `production`.
-2. Enable **Required reviewers** and add the owner. This is the gate that makes an
-   unattended release impossible.
-3. Optionally restrict **Deployment branches** to `main`.
+2. Enable **Required reviewers** and add the owner. This is mandatory for both
+   deployment workflows.
+3. Restrict **Deployment branches and tags** to `main` only. This is mandatory:
+   the Environment is the authoritative ref boundary because workflow code comes
+   from the selected ref.
+4. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as Environment secrets.
+   Do not store them as repository secrets.
+
+The workflows contain an explicit `github.ref == refs/heads/main` guard as defense
+in depth. The guard is supplementary; it is not a substitute for the Environment's
+required reviewer, main-only deployment restriction, or Environment-scoped
+credentials. Keep `REGION_ID`, `ECS_INSTANCE_ID`, `D1_DATABASE_ID`, and optional
+runtime overrides in repository Variables.
 
 **Choose the HTTP exposure mode.** The committed config has `workers_dev = false`
 and no routes, so the production dashboard/API has **no stable inbound endpoint**
@@ -322,11 +352,13 @@ the only public route in either mode.
 
 The release workflow fails closed unless **all** of these hold:
 
-1. The job targets the protected `production` environment (owner approval).
-2. `confirmation` is exactly `DEPLOY`.
-3. `LIVE_READ_ONLY_VERIFIED` is exactly `YES` — the owner may only supply this
+1. The job targets the `production` Environment, which requires owner review and
+   restricts deployments to `main` only.
+2. The supplementary workflow guard confirms `github.ref` is `refs/heads/main`.
+3. `confirmation` is exactly `DEPLOY`.
+4. `LIVE_READ_ONLY_VERIFIED` is exactly `YES` — the owner may only supply this
    after §6 has passed.
-4. `HTTP_EXPOSURE_MODE` is `workers_dev` or `custom_domain`, and the custom domain
+5. `HTTP_EXPOSURE_MODE` is `workers_dev` or `custom_domain`, and the custom domain
    is present and well-formed when required.
 
 Every confirmation is `required` with **no default**, because a defaulted boolean is

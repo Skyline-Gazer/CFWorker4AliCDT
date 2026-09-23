@@ -25,6 +25,11 @@ name: Release deploy (Cron authority)
 #    dashboard is reachable is a deployment decision, not an inferred one. The
 #    resolver fails closed when it is absent or unrecognised.
 #
+# The `production` Environment is the authoritative deployment boundary: it must
+# require an owner reviewer, restrict deployment branches/tags to `main`, and hold
+# the Cloudflare deployment secrets. The workflow-level ref guard is supplementary
+# because workflow code comes from the selected ref.
+#
 # RELEASE also restores `secrets.required`, which PRE-FLIGHT had to clear because a
 # Worker that does not exist yet cannot hold secrets. From here on, a deployment
 # missing a required secret fails loudly.
@@ -68,6 +73,12 @@ jobs:
     environment: production
 
     steps:
+      - name: Guard deployment ref
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Deployment workflows may run only from refs/heads/main."
+          exit 1
+
       - name: Verify the deployment confirmation
         if: ${{ inputs.confirmation != 'DEPLOY' }}
         run: |
