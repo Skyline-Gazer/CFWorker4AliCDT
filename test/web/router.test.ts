@@ -238,6 +238,52 @@ describe("route — no mutating route exists (SPEC §8.5, A6)", () => {
     expect(deps).not.toHaveProperty("startInstance");
     expect(deps).not.toHaveProperty("stopInstance");
   });
+
+  it("does not recognise a control path even when authenticated", async () => {
+    // The 404s above are asserted with valid credentials, so a 401 would mask a
+    // route that exists. This pins that the status is 404 and not 401/405.
+    const { deps } = harness();
+    for (const path of controlPaths) {
+      const result = await route(request("POST", path, basic("admin", "tok123")), deps);
+      expect(result.status).toBe(404);
+    }
+  });
+
+  it("never invokes a handler for an unknown path", async () => {
+    // A route that 404s must also not have done any work on the way there.
+    let calls = 0;
+    const { deps } = harness({
+      dashboard: () => {
+        calls += 1;
+        return { body: "x" };
+      },
+      history: () => {
+        calls += 1;
+        return Promise.resolve([]);
+      },
+      query: () => {
+        calls += 1;
+        return Promise.resolve({});
+      },
+    });
+    for (const path of ["/start", "/stop", "/api/control", "/nope"]) {
+      await route(request("POST", path, basic("admin", "tok123")), deps);
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("does not run a handler when authentication fails", async () => {
+    let calls = 0;
+    const { deps } = harness({
+      dashboard: () => {
+        calls += 1;
+        return { body: "leaked" };
+      },
+    });
+    const result = await route(request("GET", "/", basic("admin", "WRONG")), deps);
+    expect(result.status).toBe(401);
+    expect(calls).toBe(0);
+  });
 });
 
 describe("route — handler failures do not leak (SPEC §7.5)", () => {
