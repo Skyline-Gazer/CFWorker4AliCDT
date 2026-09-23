@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { CallRpcOptions, FetchLike, RpcError } from "./rpc";
 import { callRpc } from "./rpc";
+import type { SignatureVersion } from "./signing";
 
 /**
  * Typed Alibaba Cloud operations used by one run.
@@ -206,6 +207,17 @@ export function reduceTraffic(response: unknown): TrafficReading {
 export interface ApiContext {
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
+  /**
+   * Signature generation to use. Defaults to V3.
+   *
+   * Threaded through to `callRpc` because SPEC §4.1 requires the method be
+   * selectable by configuration: the target CDT operation is undocumented, so
+   * the accepted signature generation cannot be confirmed from documentation and
+   * switching to V2 must be a configuration change rather than a refactor.
+   * Without this, `SIGNATURE_VERSION` validated successfully and then had no
+   * effect — it was silently ignored.
+   */
+  readonly signatureVersion?: SignatureVersion | undefined;
   /** Injected for tests; defaults to the global `fetch`. */
   readonly fetch?: FetchLike | undefined;
   readonly now?: (() => number) | undefined;
@@ -225,6 +237,13 @@ function rpcOptions(
     version,
     accessKeyId: context.accessKeyId,
     accessKeySecret: context.accessKeySecret,
+    // Threaded through so a configured signature generation actually takes
+    // effect; omitting it made SIGNATURE_VERSION a validated no-op (SPEC §4.1).
+    // Spread rather than assigned because `exactOptionalPropertyTypes` treats an
+    // explicit `undefined` as different from an absent key.
+    ...(context.signatureVersion === undefined
+      ? {}
+      : { signatureVersion: context.signatureVersion }),
     parameters,
     fetch: context.fetch,
     now: context.now,
