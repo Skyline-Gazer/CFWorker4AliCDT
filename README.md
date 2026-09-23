@@ -74,7 +74,27 @@ and unavailable traffic are different facts, and only one of them is safe to inf
 - **The dashboard and API are authenticated**; the only public route is `GET /health`,
   which performs no privileged work.
 
-## Configuration
+## Deployment
+
+Pre-deployment, and **two-stage** by design. The short version:
+
+```
+PRE-FLIGHT  →  first deploy, Cron explicitly disabled (triggers.crons = [])
+            →  Version URL
+            →  live READ-ONLY verification of R2/R3/R4 via POST /api/query
+            →  owner confirms
+RELEASE     →  separate, approved dispatch: stable HTTP endpoint + Cron */10 * * * *
+```
+
+The split exists because enabling Cron before the traffic unit has been checked
+would let the system act on a _valid but incorrect_ threshold comparison — the one
+failure the fail-closed design cannot detect. `wrangler versions upload` cannot be
+used for the first upload of a new Worker, so the bootstrap is a real `wrangler
+deploy` whose config declares no Cron Trigger.
+
+HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`), with
+no default; the committed config exposes no stable endpoint. Full procedure:
+[`docs/operations/deployment.md`](docs/operations/deployment.md).
 
 Five secrets (set via `wrangler secret put`; never committed):
 

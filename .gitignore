@@ -4,10 +4,20 @@ node_modules/
 # Wrangler local state and build output
 .wrangler/
 
-# Generated at deploy time with the D1 id injected; never committed (see
-# scripts/resolve-deploy-config.mjs). Distinct from wrangler.jsonc so Wrangler
-# never picks it up implicitly.
+# Generated deployment configs. They are written at the repository root because
+# Wrangler resolves `main` relative to the config's directory, and they are
+# gitignored so no production identifier ever enters the tracked tree. Distinct
+# filenames from wrangler.jsonc, so Wrangler never picks one up implicitly (see
+# scripts/resolve-deploy-config.mjs).
 wrangler.deploy.jsonc
+wrangler.preflight.jsonc
+
+# Scratch configs written at the repository root by the tests that exercise the
+# real resolver. They must be at the root because Wrangler resolves `main`
+# relative to the config's directory, and the resolver refuses any other
+# location. Each test file uses a distinct filename so parallel test files do not
+# race on one path.
+wrangler.test-*.jsonc
 dist/
 worker-configuration.d.ts
 

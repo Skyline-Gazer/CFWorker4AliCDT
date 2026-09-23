@@ -1,0 +1,160 @@
+name: Preflight deploy (read-only verification)
+
+# FIRST STAGE of the two-stage first deployment (PLAN §14, R10).
+#
+# This workflow exists because the first `wrangler deploy` for a new Worker cannot
+# be replaced by `wrangler versions upload`: Cloudflare documents that
+# `wrangler versions upload` fails the first time a Worker is uploaded, and must be
+# preceded by `wrangler deploy` or C3. So the safe bootstrap *is* a real deploy —
+# which makes it essential that this Worker has no scheduled authority.
+#
+# WHAT THIS STAGE GUARANTEES
+#
+# 1. **Cron is disabled, explicitly.** The generated config sets
+#    `triggers.crons = []`. Cloudflare documents that an empty array *removes* all
+#    Cron Triggers, whereas omitting the field leaves the currently deployed
+#    triggers in place. The distinction is why the resolver writes `[]` rather than
+#    deleting the key.
+#
+# 2. **No stable production HTTP endpoint.** `workers_dev = false` and no route, so
+#    there is no inbound control surface to forget about. A Version URL is exposed
+#    instead (`preview_urls = true`), which is what the owner verifies against.
+#
+# 3. **The run cannot mutate an instance.** No scheduled execution is triggered, and
+#    no CLI step calls StartInstance or StopInstance. The read-only verification is
+#    performed by the owner against `POST /api/query`, which is read-only by
+#    construction (SPEC §8.5).
+#
+# 4. **This stage cannot promote itself.** Enabling the production Cron is RELEASE's
+#    job, and RELEASE is a separate, explicitly authorized dispatch. Nothing here
+#    chains into it.
+#
+# ORDER: migrations run before the deploy, because the schema must exist before a
+# Worker version that reads it is live. The D1 database is created by the owner
+# before this runs; see docs/operations/deployment.md.
+#
+# No secret value is echoed. Commands reference bindings by name; the resolved D1
+# identifier is not printed either.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a deployment in flight: a half-applied migration is worse than a
+# slow one.
+concurrency:
+  group: deploy-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight — first deploy, Cron disabled
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Deliberately NOT the protected `production` environment. Preflight holds no
+    # scheduled authority; requiring an approval for it would train the owner to
+    # approve this stage reflexively, which is exactly the habit that must not
+    # carry over to RELEASE.
+    #
+    # Consequence for credential placement: because this job does not attach the
+    # environment, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and
+    # `D1_DATABASE_ID` must be **repository-level** values, not environment-level
+    # ones. A value stored only on the `production` environment would be invisible
+    # here and this deploy would fail with empty credentials.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci --no-audit --no-fund
+
+      # The same validation PR CI runs, against the exact commit being deployed.
+      - name: Validate
+        run: npm run validate
+
+      # Fails closed if the credentials the preflight deploy needs are not visible at
+      # the repository level. PRE-FLIGHT deliberately does not attach the
+      # `production` environment, so a value stored only there would be invisible
+      # and this job would fail later with a less actionable error.
+      - name: Verify repository-level credentials are visible
+        run: |
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID is empty in this job."
+            echo "PRE-FLIGHT does not attach the production environment, so"
+            echo "CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and D1_DATABASE_ID must be"
+            echo "repository-level values. A value stored only on the environment is"
+            echo "invisible here. See docs/operations/deployment.md §3c."
+            exit 1
+          fi
+          if [ -z "${D1_DATABASE_ID}" ]; then
+            echo "::error::D1_DATABASE_ID is empty in this job; set it as a repository variable."
+            exit 1
+          fi
+          echo "Repository-level credentials are visible to this job."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+
+      # Injects the D1 database id from a repository variable into a generated
+      # config, so the identifier is never committed and the committed config is
+      # never mutated in place. Fails loudly if the variable is unset.
+      #
+      # `--mode preflight` is what writes `triggers.crons = []`. It is not a
+      # formatting detail: it is the difference between this Worker having no Cron
+      # Trigger and this Worker inheriting whatever is already deployed.
+      - name: Resolve preflight configuration
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+        run: node scripts/resolve-deploy-config.mjs --mode preflight
+
+      # Ordered first, deliberately: the schema must exist before a Worker version
+      # that reads it is live.
+      - name: Apply D1 migrations (remote)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 migrations apply TRAFFIC_DB --remote --config wrangler.preflight.jsonc
+
+      # The first real `wrangler deploy` for this Worker. It creates the Worker and
+      # uploads a version; it does not enable Cron, because the config it uses
+      # declares an empty `crons` array.
+      - name: Deploy preflight Worker (Cron disabled)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.preflight.jsonc
+
+      # Evidence only. Deliberately does not print secret values, and
+      # `wrangler secret list` reports names, not values.
+      - name: Record deployed secret names
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler secret list --config wrangler.preflight.jsonc
+
+      # The owner's next action is manual and cannot be automated here: verify the
+      # Version URL, then authorize RELEASE. Stated rather than implied, because
+      # the safe sequence is the whole point of this stage.
+      - name: Next step — live read-only verification
+        run: |
+          echo "Preflight deployed with Cron explicitly disabled (triggers.crons = [])."
+          echo ""
+          echo "The owner now verifies, against the Version URL returned by 'wrangler deploy':"
+          echo "  1. GET /health returns 200 without authentication."
+          echo "  2. Protected routes reject an unauthenticated request."
+          echo "  3. POST /api/query, authenticated, returns traffic, ECS state, and the decision."
+          echo "  4. The query performed no StartInstance, no StopInstance, no D1 history write,"
+          echo "     and dispatched no webhook."
+          echo "  5. The returned traffic matches the Alibaba console for the same period."
+          echo ""
+          echo "Only then may RELEASE be dispatched. Scheduled mutation authority is"
+          echo "enabled by RELEASE and by nothing else; this workflow never promotes itself."
