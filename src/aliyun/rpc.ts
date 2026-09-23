@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { redact as redactText } from "../redact";
-
 import type { SignatureVersion, SignRequest } from "./signing";
 import { percentEncode } from "./encoding";
 import { signRequest } from "./signing";
@@ -124,28 +122,27 @@ const THROTTLE_CODES: Record<string, true> = {
 };
 
 /**
- * Strip credential-shaped content from remote text.
+ * Redaction, re-exported from the project's single boundary.
  *
- * **Delegates to the project's single redaction boundary** rather than
- * reimplementing the rules. This module previously carried its own, weaker copy,
- * and the divergence was not cosmetic.
+ * **A true re-export, not a wrapper.** A wrapper's behaviour would be identical
+ * today, but it would leave a second function identity in the graph — one more
+ * place a future edit could accrete logic. `test/redaction-surfaces.test.ts`
+ * asserts by reference that every module exporting a `redact` exports *this* one.
  *
- * `RpcError.message` is built from this function's output, and downstream
+ * This module previously carried its own, weaker copy, and the divergence was not
+ * cosmetic. `RpcError.message` is built from redacted text, and downstream
  * destinations — the webhook payload and the D1 write path — redact that text
- * *again* with the stronger implementation. The weaker copy here could consume a
- * scheme word as if it were the value and leave the real credential behind:
+ * *again*. The weaker copy could consume a scheme word as if it were the value and
+ * leave the real credential behind:
  *
  *   raw    `Authorization: Bearer tok123 rejected`
- *   here   `Authorization: [REDACTED] tok123 rejected`   <- "Bearer" eaten
+ *   weak   `Authorization: [REDACTED] tok123 rejected`   <- "Bearer" eaten
  *   stored `Authorization: [REDACTED]] tok123 rejected`  <- token reached D1
  *
- * Two lists could always disagree again; one boundary cannot. The acceptance
- * tests for this behaviour live in `test/aliyun/redact.test.ts`, including
- * idempotence, which is what makes a second pass safe.
+ * Two key lists could always disagree again; one boundary cannot.
  */
-export function redact(text: string): string {
-  return redactText(text);
-}
+import { redact } from "../redact";
+export { redact };
 
 /**
  * The subset of an Alibaba RPC response envelope this module interprets.
