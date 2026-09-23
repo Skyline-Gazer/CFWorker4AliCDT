@@ -65,6 +65,11 @@ when a required secret is missing, and from a successful first run.
 
 ## 3. Deploying
 
+There are two paths. Use the **manual local** path for a first deployment, so every
+step is visible. Use the **gated workflow** once the environment is configured.
+
+### 3a. Manual local deployment
+
 ```sh
 npm ci
 npm run validate          # format, lint, typecheck, test, dry-run
@@ -77,6 +82,48 @@ invocation — so it cannot be left half-run.
 
 The migration step is ordered before the deploy so the schema exists before a
 Worker version that writes to it is live.
+
+### 3b. Gated workflow (`.github/workflows/deploy.yml`)
+
+Three properties are enforced by the workflow file itself:
+
+1. **No pull request can trigger it.** Only `workflow_dispatch`. PR CI is a
+   separate workflow that holds no credentials and performs no deployment, so a PR
+   cannot reach production secrets even indirectly.
+2. **A human gate stands in front of it.** The job targets the `production` GitHub
+   Environment. **Configuring that environment with required reviewers is an owner
+   action** — see §3c. Without it the workflow still requires a manual dispatch and
+   a typed confirmation, but there is no approval step.
+3. **The migration runs before the Worker**, because the schema must exist before a
+   Worker version that writes to it is live.
+
+It also requires a typed `DEPLOY` confirmation, so a mis-click cannot reach
+production.
+
+### 3c. Configuring the protected environment (owner action, one time)
+
+The workflow cannot assert these; they are GitHub settings.
+
+1. **Settings → Environments → New environment**, named exactly `production`.
+2. Enable **Required reviewers** and add the owner. This is the gate that makes an
+   unattended deploy impossible.
+3. Optionally restrict **Deployment branches** to `main`.
+4. Add the following to that environment (or to repository settings):
+
+   | Name | Kind | Value |
+   | --- | --- | --- |
+   | `D1_DATABASE_ID` | **Variable** | The remote `TRAFFIC_DB` UUID |
+   | `CLOUDFLARE_API_TOKEN` | Secret | A token scoped to Workers + D1 |
+   | `CLOUDFLARE_ACCOUNT_ID` | Secret | The account identifier |
+
+`D1_DATABASE_ID` is a **variable, not a secret**: it is an identifier rather than a
+credential, and treating it as a secret would make it harder to audit without making
+it safer. It is nonetheless never committed — `scripts/resolve-deploy-config.mjs`
+injects it into a generated config at deploy time and fails loudly if it is unset.
+
+**The committed `wrangler.jsonc` is never modified by the deploy process.** It
+declares the `TRAFFIC_DB` binding with no `database_id`, which keeps the repository
+free of production configuration.
 
 ## 4. `StopCharging` implications — read before changing `STOPPED_MODE`
 
