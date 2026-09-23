@@ -27,10 +27,10 @@ import { afterAll, describe, expect, it } from "vitest";
  * than importing it, because the script *is* the artifact the workflows invoke. A
  * test against an imported helper would not prove the CLI works.
  *
- * Each test writes to its own scratch path via `DEPLOY_CONFIG_PATH`, inside
- * `test-output/` (gitignored, and outside `test/` so Vitest does not collect it).
- * Sharing one path would make the tests order-dependent and would race other test
- * files under Vitest's parallel file execution.
+ * Each test writes to its own root-level scratch path via `DEPLOY_CONFIG_PATH`.
+ * The path must be at the repository root — the resolver refuses any other
+ * location — and a file-unique name keeps parallel test files from racing on one
+ * path. `wrangler.test-*.jsonc` is gitignored.
  */
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");

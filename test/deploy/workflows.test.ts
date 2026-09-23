@@ -254,10 +254,19 @@ describe("RELEASE carries the required gates", () => {
   });
 
   it("echoes no secret values", () => {
-    for (const step of allSteps(RELEASE)) {
-      const run = step.run ?? "";
-      expect(run).not.toMatch(/echo\s+\$\{\{\s*secrets\./);
-      expect(run).not.toMatch(/echo\s+"\$\{?CLOUDFLARE_API_TOKEN/);
+    for (const [label, workflow] of [
+      ["preflight.yml", PREFLIGHT],
+      ["release.yml", RELEASE],
+    ] as const) {
+      for (const step of allSteps(workflow)) {
+        const run = step.run ?? "";
+        expect(run, `${label}: ${step.name ?? "unnamed step"}`).not.toMatch(
+          /echo\s+\$\{\{\s*secrets\./,
+        );
+        expect(run, `${label}: ${step.name ?? "unnamed step"}`).not.toMatch(
+          /echo\s+"\$\{?CLOUDFLARE_API_TOKEN/,
+        );
+      }
     }
   });
 });
