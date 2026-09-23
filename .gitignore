@@ -3,6 +3,11 @@ node_modules/
 
 # Wrangler local state and build output
 .wrangler/
+
+# Generated at deploy time with the D1 id injected; never committed (see
+# scripts/resolve-deploy-config.mjs). Distinct from wrangler.jsonc so Wrangler
+# never picks it up implicitly.
+wrangler.deploy.jsonc
 dist/
 worker-configuration.d.ts
 
