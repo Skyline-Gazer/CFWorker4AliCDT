@@ -81,6 +81,38 @@ const PRODUCTION_CRONS = ["*/10 * * * *"];
 const MODES = ["preflight", "release"];
 
 /**
+ * Application runtime variables that MUST be present in a generated config.
+ *
+ * `loadConfig()` rejects a Worker whose environment lacks these, so a deployment
+ * that omitted them would succeed and then fail at the first request — the worst
+ * moment to discover a missing binding, and one that a dry-run cannot catch.
+ * Failing here means the deploy never starts.
+ *
+ * These are application configuration, not credentials. They are supplied as
+ * repository *variables*.
+ */
+const REQUIRED_APPLICATION_VARS = ["REGION_ID", "ECS_INSTANCE_ID"];
+
+/**
+ * Application runtime variables that MAY be overridden per deployment.
+ *
+ * When a non-empty value is supplied it replaces the committed default; when it is
+ * not, the committed `wrangler.jsonc` value is preserved. This keeps the repository
+ * config the single place a default is stated.
+ *
+ * Deliberately NOT validated here beyond presence. Whether a threshold is a
+ * positive number or a signature version is `v2`/`v3` is `loadConfig()`'s job;
+ * duplicating that logic would create two implementations that can disagree.
+ */
+const OPTIONAL_APPLICATION_VARS = [
+  "TRAFFIC_THRESHOLD_GB",
+  "CDT_ENDPOINT",
+  "BUSINESS_REGION_ID",
+  "SIGNATURE_VERSION",
+  "STOPPED_MODE",
+];
+
+/**
  * HTTP exposure modes. There is deliberately **no default**: silence about how
  * the dashboard is reachable is the gap this exists to close, so an absent value
  * is a failure rather than a chosen behaviour.
@@ -140,6 +172,49 @@ function injectDatabaseId(binding) {
     );
   }
   binding.database_id = databaseId.trim();
+}
+
+/**
+ * Inject the application runtime configuration into `vars`.
+ *
+ * Both modes call this, so a change of deployment mode cannot silently change what
+ * the Worker is configured to do. Mode-specific properties (Cron, preview URL,
+ * workers.dev vs custom domain, the required-secret declaration) are the only
+ * things a mode may alter.
+ *
+ * Failure messages name bindings only. A value from the environment never reaches
+ * CI logs, and no supplied value is ever echoed.
+ */
+function injectApplicationVars(config) {
+  const vars = typeof config.vars === "object" && config.vars !== null ? config.vars : {};
+
+  // Required first, and before any optional work: a config missing a required
+  // binding is not worth generating at all.
+  for (const name of REQUIRED_APPLICATION_VARS) {
+    const value = process.env[name];
+    if (!present(value)) {
+      fail(
+        `${name} is required and must be non-empty.\n` +
+          "Supply it as a repository variable. It is application configuration, not a\n" +
+          "credential, so it does not belong in GitHub Secrets. Generating a config\n" +
+          "without it would deploy successfully and then fail every request that calls\n" +
+          "loadConfig(), which is the failure this guard exists to prevent.",
+      );
+    }
+    vars[name] = value.trim();
+  }
+
+  // Optional overrides: apply when supplied, otherwise preserve the committed
+  // default. `BUSINESS_REGION_ID` has no committed default, so leaving it absent
+  // is the correct outcome rather than writing an empty string.
+  for (const name of OPTIONAL_APPLICATION_VARS) {
+    const value = process.env[name];
+    if (present(value)) {
+      vars[name] = value.trim();
+    }
+  }
+
+  config.vars = vars;
 }
 
 /**
@@ -234,6 +309,9 @@ const mode = parseArguments(process.argv.slice(2));
 
 const { config, binding } = readSourceConfig();
 injectDatabaseId(binding);
+// Application configuration is injected for BOTH modes, from this one boundary,
+// so a mode can never silently change what the Worker is configured to do.
+injectApplicationVars(config);
 
 if (mode === "preflight") {
   applyPreflight(config);

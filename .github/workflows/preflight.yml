@@ -88,6 +88,12 @@ jobs:
       # the repository level. PRE-FLIGHT deliberately does not attach the
       # `production` environment, so a value stored only there would be invisible
       # and this job would fail later with a less actionable error.
+      #
+      # It also fails closed if a required application runtime variable is absent.
+      # `loadConfig()` requires REGION_ID and ECS_INSTANCE_ID, so a deployment that
+      # omitted them would succeed and then fail at the first request — the worst
+      # moment to discover a missing binding. Failing here means the deploy never
+      # starts. Only binding NAMES are reported; no value is ever printed.
       - name: Verify repository-level credentials are visible
         run: |
           if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
@@ -102,11 +108,23 @@ jobs:
             echo "::error::D1_DATABASE_ID is empty in this job; set it as a repository variable."
             exit 1
           fi
-          echo "Repository-level credentials are visible to this job."
+          for name in REGION_ID ECS_INSTANCE_ID; do
+            value="$(printenv "$name" || true)"
+            if [ -z "${value//[[:space:]]/}" ]; then
+              echo "::error::$name is empty in this job."
+              echo "$name is required at runtime: without it loadConfig() rejects every"
+              echo "request the Worker serves. Set it as a repository variable (not a"
+              echo "secret). See docs/operations/deployment.md §3c."
+              exit 1
+            fi
+          done
+          echo "Repository-level credentials and required application variables are visible."
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          REGION_ID: ${{ vars.REGION_ID }}
+          ECS_INSTANCE_ID: ${{ vars.ECS_INSTANCE_ID }}
 
       # Injects the D1 database id from a repository variable into a generated
       # config, so the identifier is never committed and the committed config is
@@ -120,9 +138,22 @@ jobs:
       # relaxed safety check: a Worker that does not exist yet cannot hold secrets,
       # so a first deploy declaring them is refused outright. RELEASE restores the
       # full list. Set the secrets during this stage anyway; see deployment.md §1.
+      #
+      # The application runtime variables are injected here too, from the same
+      # resolver boundary RELEASE uses, so a change of mode cannot silently change
+      # what the Worker is configured to do. The optional overrides are passed
+      # through unset by default, in which case the committed wrangler.jsonc default
+      # is preserved.
       - name: Resolve preflight configuration
         env:
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          REGION_ID: ${{ vars.REGION_ID }}
+          ECS_INSTANCE_ID: ${{ vars.ECS_INSTANCE_ID }}
+          TRAFFIC_THRESHOLD_GB: ${{ vars.TRAFFIC_THRESHOLD_GB }}
+          CDT_ENDPOINT: ${{ vars.CDT_ENDPOINT }}
+          BUSINESS_REGION_ID: ${{ vars.BUSINESS_REGION_ID }}
+          SIGNATURE_VERSION: ${{ vars.SIGNATURE_VERSION }}
+          STOPPED_MODE: ${{ vars.STOPPED_MODE }}
         run: node scripts/resolve-deploy-config.mjs --mode preflight
 
       # Ordered first, deliberately: the schema must exist before a Worker version

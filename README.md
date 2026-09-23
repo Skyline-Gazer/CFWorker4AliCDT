@@ -106,17 +106,30 @@ Five secrets (set via `wrangler secret put`; never committed):
 | `WEBHOOK_TOKEN`            | Optional. Sent as `Authorization: Bearer <token>`.                         |
 | `ADMIN_TOKEN`              | Required for the dashboard and API. Absent ⇒ every protected route denies. |
 
-Seven plain variables (`wrangler.jsonc`):
+Seven plain variables, as three distinct classes — see
+[`docs/operations/deployment.md`](docs/operations/deployment.md) §1a:
+
+- **Required application variables (repository variables, not secrets):**
+  `REGION_ID`, `ECS_INSTANCE_ID`. The resolver refuses to generate a deployment
+  config without them, because a deploy that omitted them would succeed and then
+  fail `loadConfig()` on every request.
+- **Optional application overrides (repository variables):** `TRAFFIC_THRESHOLD_GB`
+  (`180`), `CDT_ENDPOINT` (`cdt.aliyuncs.com`), `BUSINESS_REGION_ID` (unset),
+  `SIGNATURE_VERSION` (`v3`), `STOPPED_MODE` (`KeepCharging`). Unset, the committed
+  `wrangler.jsonc` default is preserved.
 
 | Variable               | Default            | Notes                                            |
 | ---------------------- | ------------------ | ------------------------------------------------ |
-| `REGION_ID`            | —                  | ECS region.                                      |
-| `ECS_INSTANCE_ID`      | —                  | The single managed instance.                     |
+| `REGION_ID`            | **required**       | ECS region.                                      |
+| `ECS_INSTANCE_ID`      | **required**       | The single managed instance.                     |
 | `TRAFFIC_THRESHOLD_GB` | `180`              | **Decimal** GB. See below.                       |
 | `CDT_ENDPOINT`         | `cdt.aliyuncs.com` | Configurable because the hostname is unverified. |
 | `BUSINESS_REGION_ID`   | unset              | When set, applied as a server-side CDT filter.   |
 | `SIGNATURE_VERSION`    | `v3`               | `v2` or `v3`.                                    |
 | `STOPPED_MODE`         | `KeepCharging`     | See the deployment doc before changing.          |
+
+Deployment-only values (`D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`,
+`WORKER_CUSTOM_DOMAIN`) are a separate class and are not Worker runtime variables.
 
 ## The decimal-GB divergence — read this if migrating
 

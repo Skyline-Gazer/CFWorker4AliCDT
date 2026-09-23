@@ -183,6 +183,37 @@ the first release onward a missing secret still fails the deployment loudly. Not
 that `wrangler deploy --dry-run` does **not** surface this, because validation runs
 on the real upload path.
 
+### A13 — Required runtime vars must be injected at generation time, not discovered late
+Evidence: **verified by exercise.** `src/config.ts` requires `REGION_ID` and
+`ECS_INSTANCE_ID`; the committed `wrangler.jsonc` deliberately declares neither
+(only the four non-required defaults). A generated config that omitted them
+therefore deploys cleanly and then fails `loadConfig()` on **every** request the
+Worker serves — a Wrangler dry-run cannot detect it, because Wrangler never calls
+`loadConfig()`.
+How to verify: `test/deploy/artifact-dryrun.test.ts` feeds the exact generated
+`vars` block plus fake Worker Secrets to the real `loadConfig()` and asserts it is
+accepted, with a negative control proving the check has teeth.
+If wrong: the Worker deploys and is then permanently non-functional until
+redeployed — the failure mode this guard exists to prevent.
+In the meantime: the resolver fails **before generating** when either is absent or
+whitespace-only, in both modes, naming the binding and never printing a value. It
+injects application variables from one boundary for both modes, so a change of
+deployment mode cannot silently change the region, instance, threshold, endpoint,
+business-region selection, signature version, or stopped mode.
+
+### A14 — Secret mutation creates a new Worker version
+Evidence: **documented.** `wrangler secret put` creates a new version and deploys it
+immediately; only `wrangler versions secret put` avoids deploying. So the Version
+URL printed by the initial bootstrap deploy is not necessarily the version that
+exists after secrets are attached.
+How to verify: the `wrangler secret put` output and the Worker's Deployments list.
+If wrong: verification is performed against a superseded version, so its evidence
+does not describe what is deployed. This does **not** risk mutation — every version
+descends from the preflight config that declares `triggers.crons = []`, so Cron is
+absent throughout — but it would make the verification evidence invalid.
+In the meantime: the deployment runbook instructs the owner to locate and verify the
+**latest applicable Version URL** after the final secret update.
+
 ## 3. Recorded corrections to the originating brief
 
 | Brief claim | Correction | Source |
@@ -232,6 +263,10 @@ is a separate owner action that restores `*/10 * * * *`.
    instance untouched.
 9. **Measure CPU (A8).** Read the first scheduled invocation's `cpuTime` and record
    the required plan in the deployment documentation.
+
+Steps 1–7 must be run against the **latest applicable Version URL**. Because
+`wrangler secret put` deploys a new version (A14), re-locate it after the final
+secret update rather than reusing the URL from the initial bootstrap deploy.
 
 Until steps 5–6 pass, treat the traffic figure as **unverified**, not as a
 measurement. Until RELEASE, there is no scheduled mutation to be wrong about.
