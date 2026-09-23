@@ -40,7 +40,20 @@ function parseJsonc(text) {
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const sourcePath = resolve(repoRoot, "wrangler.jsonc");
-const outputPath = process.env.DEPLOY_CONFIG_PATH ?? resolve(repoRoot, ".wrangler/deploy.jsonc");
+
+/**
+ * The generated config MUST sit in the repository root.
+ *
+ * Wrangler treats the config file's **directory** as the project root, so `main:
+ * "src/index.ts"` is resolved relative to the config's location. A config written
+ * to a temp directory, or even to `.wrangler/`, makes Wrangler look for the entry
+ * point outside the repository and fail with "The entry-point file at
+ * src/index.ts was not found" — measured, not assumed.
+ *
+ * The filename is distinct from `wrangler.jsonc` so Wrangler never picks it up
+ * implicitly, and it is gitignored.
+ */
+const outputPath = process.env.DEPLOY_CONFIG_PATH ?? resolve(repoRoot, "wrangler.deploy.jsonc");
 
 const databaseId = process.env.D1_DATABASE_ID;
 
@@ -72,6 +85,18 @@ binding.database_id = databaseId.trim();
 
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
+// Verify the config landed beside the entry point it references. This is the
+// failure that would otherwise only appear during a real deploy, with a message
+// that points at the entry point rather than at the config's location.
+if (dirname(outputPath) !== repoRoot) {
+  process.stderr.write(
+    `Refusing to write the generated config outside the repository root.\n` +
+      `Wrangler resolves 'main' relative to the config's directory, so a config at\n` +
+      `${dirname(outputPath)} would look for the entry point there and fail.\n`,
+  );
+  process.exit(1);
+}
 
 // The resolved id is deliberately NOT printed. It is an infrastructure
 // identifier, and this output goes to CI logs.
