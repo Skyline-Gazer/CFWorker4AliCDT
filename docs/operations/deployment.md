@@ -428,8 +428,9 @@ what looks like a lower traffic figure. That is this behaviour, not a bug.
 ## 6. First-live-run verification — performed BEFORE Cron is enabled
 
 This is the procedure that makes the two-stage bootstrap worth its extra step. It
-runs against the **Version URL** from PRE-FLIGHT, while there is no Cron Trigger and
-therefore no way for the system to act.
+runs against the **latest applicable Version URL** — see §3b step 2 for why the
+secret updates mean that is not necessarily the URL from the initial deploy — while
+Cron remains absent and there is no way for the system to act.
 
 ### Why it cannot wait until after a scheduled run
 
@@ -443,6 +444,10 @@ exists. Verifying it afterwards is verifying the assumption with the instance
 already able to be stopped by it.
 
 ### The sequence
+
+**Prerequisite:** the five Worker Secrets from §1c are configured (§3b step 2). The
+first four are needed for a meaningful result — without them `loadConfig()` fails
+and `/api/query` cannot return traffic at all.
 
 1. **`GET /health`** — public, inert. Confirms the Worker is reachable and returns
    `200` with no Alibaba call and no D1 read.
