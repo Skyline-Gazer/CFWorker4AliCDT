@@ -103,11 +103,22 @@ jobs:
       # `--mode release` restores `triggers.crons = ["*/10 * * * *"]` and applies the
       # owner's HTTP exposure choice. It fails closed when HTTP_EXPOSURE_MODE is
       # absent, unrecognised, or `custom_domain` without WORKER_CUSTOM_DOMAIN.
+      #
+      # The application runtime variables are injected from the same resolver
+      # boundary PRE-FLIGHT used, with the same inputs, so a change of mode cannot
+      # silently change what the Worker is configured to do.
       - name: Resolve release configuration
         env:
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
           HTTP_EXPOSURE_MODE: ${{ inputs.HTTP_EXPOSURE_MODE }}
           WORKER_CUSTOM_DOMAIN: ${{ vars.WORKER_CUSTOM_DOMAIN }}
+          REGION_ID: ${{ vars.REGION_ID }}
+          ECS_INSTANCE_ID: ${{ vars.ECS_INSTANCE_ID }}
+          TRAFFIC_THRESHOLD_GB: ${{ vars.TRAFFIC_THRESHOLD_GB }}
+          CDT_ENDPOINT: ${{ vars.CDT_ENDPOINT }}
+          BUSINESS_REGION_ID: ${{ vars.BUSINESS_REGION_ID }}
+          SIGNATURE_VERSION: ${{ vars.SIGNATURE_VERSION }}
+          STOPPED_MODE: ${{ vars.STOPPED_MODE }}
         run: node scripts/resolve-deploy-config.mjs --mode release
 
       # Ordered first, deliberately: the schema must exist before a Worker version

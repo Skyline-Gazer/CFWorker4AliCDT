@@ -649,6 +649,18 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
   resolver fails closed when it is absent, unrecognised, or `custom_domain` without a
   well-formed `WORKER_CUSTOM_DOMAIN`. These are deployment-only values, not Worker
   runtime variables, and are deliberately not added to the SPEC's seven.
+- **Application runtime configuration is injected by the resolver, from one
+  boundary, for both modes.** `REGION_ID` and `ECS_INSTANCE_ID` are required
+  repository *variables*; the resolver fails **before generating** when either is
+  absent, because a deploy that omitted them would succeed and then fail
+  `loadConfig()` on every request — a state a Wrangler dry-run cannot detect. The
+  optional overrides (`TRAFFIC_THRESHOLD_GB`, `CDT_ENDPOINT`, `BUSINESS_REGION_ID`,
+  `SIGNATURE_VERSION`, `STOPPED_MODE`) replace the committed default only when
+  supplied. A mode may change only mode-specific properties (Cron, preview URL,
+  workers.dev vs custom domain, the required-secret declaration) — never the runtime
+  configuration. Resolution lives in the config boundary rather than the Cloudflare
+  Dashboard, because without `keep_vars` a later deploy replaces Dashboard-managed
+  vars and the config would stop being reproducible.
 - Secrets set via `wrangler secret put`; never via `vars`, never via a committed file.
 - D1 database created via Wrangler; `database_id` supplied from a repository
   variable/secret, never committed, never rewritten into config by a CI script (D8).

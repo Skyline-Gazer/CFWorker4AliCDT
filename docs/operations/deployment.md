@@ -53,23 +53,63 @@ The owner confirms each item **before** the Worker is allowed to run against a
 real account. Nothing here is discoverable from the code; each is an owner
 decision or an external fact.
 
-### Plain variables (Wrangler `vars`)
+### 1a. The three classes of configuration — do not blur them
+
+Three distinct classes exist, and conflating them causes real deployment defects:
+
+| Class | Lives in | Set by | Examples |
+| --- | --- | --- | --- |
+| **Application runtime variables** | Generated Wrangler `vars` | GitHub **Variables** | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB` |
+| **Deployment-only values** | The resolver / workflow invocation | GitHub Variables, Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
+| **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / the dashboard | `ALIYUN_ACCESS_KEY_ID`, `ADMIN_TOKEN` |
+
+The difference that matters: **application runtime variables configure how the
+Worker behaves and are not credentials**, so they belong in GitHub Variables, not
+Secrets. **Worker Secrets are credentials**, are attached on Cloudflare, and are
+never routed through GitHub.
+
+### 1b. Application runtime repository variables
+
+These become the `vars` block of the generated deployment config. Because the
+generated artifact is authoritative, they must be present at generation time.
+
+**Required.** `loadConfig()` rejects a Worker whose environment lacks these, so a
+deployment that omitted them would succeed and then fail at the first request:
 
 | Variable | Requirement | Confirmed? |
 | --- | --- | --- |
-| `REGION_ID` | The ECS region, e.g. a region identifier. Used to build `ecs.<REGION_ID>.aliyuncs.com`. | ☐ |
+| `REGION_ID` | The ECS region. Used to build `ecs.<REGION_ID>.aliyuncs.com`. | ☐ |
 | `ECS_INSTANCE_ID` | **Exactly one** instance. The Worker manages no other. | ☐ |
-| `TRAFFIC_THRESHOLD_GB` | Threshold in **decimal GB** (default `180`). See §5 on the unit. | ☐ |
-| `CDT_ENDPOINT` | Default `cdt.aliyuncs.com` — **unverified** (A1). Confirm at first run. | ☐ |
-| `BUSINESS_REGION_ID` | Optional. Unset by default, so no CDT filter is applied. | ☐ |
-| `SIGNATURE_VERSION` | `v3` (default) or `v2`. See §6 if the first run is rejected. | ☐ |
-| `STOPPED_MODE` | `KeepCharging` (default) or `StopCharging`. **Read §4 before changing.** | ☐ |
 
-These seven are the SPEC §2.2 **application** variables. They configure the
-Worker at runtime. Deployment-only values (§3c) are a separate set and are never
-added to this table.
+**Optional overrides.** When the repository variable is unset or empty, the
+committed default in `wrangler.jsonc` is preserved — the repository stays the one
+place a default is stated:
 
-### Secrets (Workers Secrets) — five names, values never committed
+| Variable | Committed default | Notes |
+| --- | --- | --- |
+| `TRAFFIC_THRESHOLD_GB` | `180` | Threshold in **decimal GB**. See §5 on the unit. |
+| `CDT_ENDPOINT` | `cdt.aliyuncs.com` | **Unverified** (A1). Confirm at first run. |
+| `BUSINESS_REGION_ID` | *(absent)* | When unset, no CDT filter is applied. |
+| `SIGNATURE_VERSION` | `v3` | `v2` or `v3`. See §6 if the first run is rejected. |
+| `STOPPED_MODE` | `KeepCharging` | **Read §4 before changing.** |
+
+Together these are the SPEC §2.2 **application** variables. Deployment-only values
+(§3c) are a separate set and are never added to this table.
+
+**Why the config, not the Cloudflare Dashboard.** Wrangler treats the config as the
+source of truth. Without `keep_vars`, a later deploy replaces Dashboard-managed
+vars with those in the deployed config, so Dashboard edits are silently lost. Since
+this project has a deterministic generated-config boundary, the fix is to keep
+resolution there rather than to add hidden Dashboard state via `keep_vars`.
+
+**Resolution happens in the resolver, not in the Worker.** The resolver's
+responsibility is *deployment completeness*: it fails before generating if a
+required variable is absent, and injects values deterministically. It deliberately
+does **not** re-implement runtime semantic validation — whether the threshold is a
+positive number or the signature version is `v2`/`v3` remains `loadConfig()`'s job,
+so there is exactly one implementation of each rule.
+
+### 1c. Worker Secrets — five names, values never committed
 
 | Secret | Requirement | Confirmed? |
 | --- | --- | --- |
@@ -89,13 +129,15 @@ added to this table.
 | The Cloudflare account plan matches what §7 concludes. | ☐ |
 | A D1 database exists for the binding, or a decision to run without history is recorded. | ☐ |
 | The HTTP exposure decision has been made (see §3c), or a record exists of choosing none. | ☐ |
+| `REGION_ID` and `ECS_INSTANCE_ID` are set as repository **variables** (not secrets). | ☐ |
 
-**Set the secrets before RELEASE.** The PRE-FLIGHT deploy cannot declare
+**Set the Worker Secrets during preflight.** The PRE-FLIGHT deploy cannot declare
 `secrets.required` (the Worker does not exist yet — see §3b), so an unset secret is
 not caught until RELEASE, where the deployment fails loudly. Setting all five
-secrets during preflight is the safe order.
+secrets during preflight is the safe order, and their version semantics are
+explained in §3b step 2.
 
-## 2. Setting secrets
+## 2. Setting Worker Secrets
 
 Each command prompts; the value is not echoed, not stored in history, and not
 written to a file.
@@ -108,9 +150,16 @@ npx wrangler secret put WEBHOOK_TOKEN
 npx wrangler secret put ADMIN_TOKEN
 ```
 
+Cloudflare's secret UI is an equivalent alternative; the choice does not affect the
+outcome.
+
 **Verify by absence, not by printing.** Do not run a command that echoes a secret
 to confirm it was set. Confirmation comes from the deployment, which fails loudly
 when a required secret is missing, and from a successful first run.
+
+> **`wrangler secret put` has version semantics.** It creates a new Worker version
+> and deploys it immediately. That interacts with preflight verification — see
+> §3b step 2.
 
 ## 3. Deploying
 
@@ -143,6 +192,13 @@ Three properties are enforced by the resolver, and each closes a measured defect
    A config rewrite in CI is how a local config silently drifts from the deployed one.
 3. **Both generated files are gitignored**, and their names are distinct from
    `wrangler.jsonc` so Wrangler never picks one up implicitly.
+
+A fourth property is what the resolver gained for deployment readiness: **both
+modes inject the application runtime variables from the same boundary** (§1b). A
+change of deployment mode may alter only mode-specific properties — Cron, the
+preview URL, `workers_dev` vs a custom domain, and the required-secret declaration.
+It may not silently change the region, the instance, the threshold, the endpoint,
+the business-region filter, the signature version, or the stopped mode.
 
 The workflow steps pass `--config` explicitly for the same reason: the dry-run in
 `npm run validate` uses `wrangler.jsonc`, and a validation against a *different*
@@ -180,16 +236,43 @@ in `test/deploy/config-resolution.test.ts`.
 The deploy reports a **Version URL**. That URL exists even with `workers_dev =
 false`, provided `preview_urls` is enabled.
 
-**Step 2 — live read-only verification.** Performed by the owner against the
-Version URL, **before** Cron exists. The full procedure is §6.
+**Step 2 — configure Worker Secrets, then verify.** Performed while Cron is still
+absent, so nothing can act on a wrong figure.
+
+> **Secret updates create versions.** `wrangler secret put` creates a new Worker
+> version and deploys it immediately. So the Version URL printed by the initial
+> bootstrap deploy is **not** necessarily the version you end up verifying after
+> secrets are attached. After the final secret update, locate and use the **latest
+> applicable Version URL** — from the `wrangler secret put` output, or the Worker's
+> Deployments list in the Cloudflare dashboard.
+>
+> This does not reintroduce risk: Cron is still absent on every one of these
+> versions, because they all descend from the preflight config that declares
+> `triggers.crons = []`. What changes is which version URL you point the checks at.
+
+Configure the secrets required for a *useful* live verification — without the
+first four, `loadConfig()` fails and `/api/query` cannot return anything:
+
+- `ALIYUN_ACCESS_KEY_ID`
+- `ALIYUN_ACCESS_KEY_SECRET`
+- `WEBHOOK_URL`
+- `ADMIN_TOKEN`
+- `WEBHOOK_TOKEN` — optional, only when the webhook endpoint requires it
+
+Then perform the read-only verification in §6 against the latest Version URL.
+
+**These are Cloudflare Worker Secrets, not GitHub Actions secrets.** Making them
+GitHub secrets solely to automate preflight is a different security model; it is
+not the current one, and changing it is an owner decision, not a convenience.
 
 **Step 3 — RELEASE** (enables Cron). Dispatch `.github/workflows/release.yml`.
 This is a separate action, and the only path that enables scheduled mutation.
 
 ### 3c. Deployment-only configuration (owner action, one time)
 
-These are **not** Worker runtime variables. They configure *how the deployment is
-performed*, and they are not in the SPEC §2.2 seven.
+These are **not** Worker runtime variables and **not** Worker Secrets. They
+configure *how the deployment is performed*, and they are not in the SPEC §2.2
+seven. See §1a for how the three classes differ.
 
 | Name | Kind | Scope | Purpose |
 | --- | --- | --- | --- |
@@ -257,10 +340,17 @@ For the preflight stage, so every step is visible:
 npm ci
 npm run validate                                   # format, lint, typecheck, test, dry-run
 export D1_DATABASE_ID=<the remote TRAFFIC_DB uuid>
+export REGION_ID=<the ECS region>                  # required at runtime
+export ECS_INSTANCE_ID=<the single instance>       # required at runtime
 node scripts/resolve-deploy-config.mjs --mode preflight
 npx wrangler d1 migrations apply TRAFFIC_DB --remote --config wrangler.preflight.jsonc
 npx wrangler deploy --config wrangler.preflight.jsonc
+# Attach Worker Secrets, then verify against the LATEST Version URL (§3b step 2).
 ```
+
+Optional overrides may be exported alongside these (`TRAFFIC_THRESHOLD_GB`,
+`CDT_ENDPOINT`, `BUSINESS_REGION_ID`, `SIGNATURE_VERSION`, `STOPPED_MODE`); unset,
+the committed `wrangler.jsonc` default is preserved.
 
 For the release stage:
 
@@ -268,6 +358,8 @@ For the release stage:
 npm ci
 npm run validate
 export D1_DATABASE_ID=<the remote TRAFFIC_DB uuid>
+export REGION_ID=<the ECS region>                  # required at runtime
+export ECS_INSTANCE_ID=<the single instance>       # required at runtime
 export HTTP_EXPOSURE_MODE=workers_dev              # or: custom_domain
 export WORKER_CUSTOM_DOMAIN=<hostname>             # required only for custom_domain
 node scripts/resolve-deploy-config.mjs --mode release

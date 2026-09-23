@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
+import { loadConfig } from "../../src/config";
+
 /**
  * Deployment-path artefact verification (mandatory lesson from PR #66).
  *
@@ -22,6 +24,10 @@ import { afterAll, describe, expect, it } from "vitest";
  *
  * Wrangler is invoked as the local dependency, never through `npx`, so the test
  * does not reach the network to resolve a package.
+ *
+ * A dry-run still does not prove the *Worker* can start. So a final group feeds the
+ * generated `vars` to the real `loadConfig()`, which is the check that a config
+ * omitting a required runtime binding would fail.
  */
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
@@ -62,6 +68,12 @@ function resolverEnv(extra: Record<string, string>): Record<string, string> {
   };
 }
 
+/** Required application runtime variables; see the module header. */
+const RUNTIME_VARS: Record<string, string> = {
+  REGION_ID: "cn-hongkong",
+  ECS_INSTANCE_ID: "i-test-instance",
+};
+
 /** Generate one config at a scratch path, and fail loudly if the resolver does. */
 function generate(mode: string, label: string, extra: Record<string, string>): string {
   const outputPath = join(REPO_ROOT, `${SCRATCH_PREFIX}${label}.jsonc`);
@@ -71,6 +83,7 @@ function generate(mode: string, label: string, extra: Record<string, string>): s
     env: resolverEnv({
       D1_DATABASE_ID: FAKE_DATABASE_ID,
       DEPLOY_CONFIG_PATH: outputPath,
+      ...RUNTIME_VARS,
       ...extra,
     }),
   });
@@ -81,6 +94,15 @@ function generate(mode: string, label: string, extra: Record<string, string>): s
 interface DryRun {
   readonly status: number | null;
   readonly output: string;
+}
+
+/** Parse the JSONC the resolver emits, using an independent stripper. */
+function readGenerated(path: string): { vars?: Record<string, string> } {
+  const stripped = readFileSync(path, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/,(\s*[}\]])/g, "$1");
+  return JSON.parse(stripped) as { vars?: Record<string, string> };
 }
 
 /** Run `wrangler deploy --dry-run` against one exact generated config file. */
@@ -148,6 +170,73 @@ describe("Wrangler accepts the exact generated RELEASE artifact", () => {
     const path = generate("release", "release-cron", { HTTP_EXPOSURE_MODE: "workers_dev" });
     expectWranglerAccepts(path);
     expect(readFileSync(path, "utf8")).toContain('"*/10 * * * *"');
+  });
+});
+
+describe("the generated artifact is sufficient for the Worker to start", () => {
+  /**
+   * A dry-run proves Wrangler accepts the config; it does not prove the *Worker*
+   * can resolve its configuration at runtime. The blocker this suite exists for was
+   * exactly that gap: a config that deploys cleanly and then fails `loadConfig()`
+   * because a required binding is absent.
+   *
+   * So this closes the loop end to end: generate the exact preflight artifact, feed
+   * its `vars` block plus the Worker secrets to the real `loadConfig()`, and assert
+   * the config is accepted. The secrets are obviously fake — the point is that the
+   * *non-secret* half is complete without any Worker Secret covering it.
+   */
+  it("loadConfig() accepts the preflight vars, with no secret covering the runtime vars", () => {
+    const path = generate("preflight", "preflight-loadconfig", {});
+    const generated = readGenerated(path);
+
+    const parsed = loadConfig({
+      ...(generated.vars ?? {}),
+      // Worker Secrets, attached separately after the preflight deploy.
+      ALIYUN_ACCESS_KEY_ID: "fake-akid",
+      ALIYUN_ACCESS_KEY_SECRET: "fake-aksecret",
+      WEBHOOK_URL: "https://hooks.example.test/run",
+      ADMIN_TOKEN: "fake-admin-token",
+    });
+
+    expect(parsed.ok, parsed.ok ? "" : parsed.error.message).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.config.regionId).toBe("cn-hongkong");
+      expect(parsed.config.ecsInstanceId).toBe("i-test-instance");
+      expect(parsed.config.trafficThresholdGB).toBe(180);
+      expect(parsed.config.cdtEndpoint).toBe("cdt.aliyuncs.com");
+      expect(parsed.config.signatureVersion).toBe("v3");
+      expect(parsed.config.stoppedMode).toBe("KeepCharging");
+      expect(parsed.config.businessRegionId).toBeUndefined();
+    }
+  });
+
+  it("loadConfig() accepts the release vars too", () => {
+    const path = generate("release", "release-loadconfig", {
+      HTTP_EXPOSURE_MODE: "workers_dev",
+    });
+    const generated = readGenerated(path);
+    const parsed = loadConfig({
+      ...(generated.vars ?? {}),
+      ALIYUN_ACCESS_KEY_ID: "fake-akid",
+      ALIYUN_ACCESS_KEY_SECRET: "fake-aksecret",
+      WEBHOOK_URL: "https://hooks.example.test/run",
+      ADMIN_TOKEN: "fake-admin-token",
+    });
+    expect(parsed.ok, parsed.ok ? "" : parsed.error.message).toBe(true);
+  });
+
+  it("demonstrates the failure this guards against: vars without the required bindings", () => {
+    // Negative control. Without REGION_ID and ECS_INSTANCE_ID, `loadConfig()` fails
+    // even with every secret present — precisely the deployed-but-broken state the
+    // resolver's required-variable guard prevents.
+    const parsed = loadConfig({
+      TRAFFIC_THRESHOLD_GB: "180",
+      ALIYUN_ACCESS_KEY_ID: "fake-akid",
+      ALIYUN_ACCESS_KEY_SECRET: "fake-aksecret",
+      WEBHOOK_URL: "https://hooks.example.test/run",
+      ADMIN_TOKEN: "fake-admin-token",
+    });
+    expect(parsed.ok).toBe(false);
   });
 });
 

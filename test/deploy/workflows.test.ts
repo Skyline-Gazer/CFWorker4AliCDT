@@ -191,6 +191,55 @@ describe("PRE-FLIGHT cannot enable Cron", () => {
     expect(resolverStep).toBeDefined();
     expect(JSON.stringify(resolverStep?.env ?? {})).not.toContain("HTTP_EXPOSURE_MODE");
   });
+
+  it("passes the required application runtime variables into the resolver", () => {
+    // Without these, the resolver refuses to generate a config, and the deploy
+    // never starts. If the workflow failed to pass them, the guard would fire on
+    // every run rather than protecting anything.
+    const resolverStep = allSteps(PREFLIGHT).find((step) => (step.run ?? "").includes("resolve-"));
+    expect(resolverStep?.env).toMatchObject({
+      REGION_ID: "${{ vars.REGION_ID }}",
+      ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
+    });
+  });
+
+  it("passes the optional application overrides through to the resolver", () => {
+    const resolverStep = allSteps(PREFLIGHT).find((step) => (step.run ?? "").includes("resolve-"));
+    for (const name of [
+      "TRAFFIC_THRESHOLD_GB",
+      "CDT_ENDPOINT",
+      "BUSINESS_REGION_ID",
+      "SIGNATURE_VERSION",
+      "STOPPED_MODE",
+    ]) {
+      expect(resolverStep?.env, name).toHaveProperty(name);
+    }
+  });
+
+  it("takes application values from repository variables, never secrets", () => {
+    // Application configuration is not a credential. Routing it through Secrets
+    // would obscure it and imply it needed protecting.
+    const resolverStep = allSteps(PREFLIGHT).find((step) => (step.run ?? "").includes("resolve-"));
+    for (const [name, value] of Object.entries(resolverStep?.env ?? {})) {
+      expect(value, name).not.toContain("secrets.");
+    }
+  });
+
+  it("guards the required runtime variables before any migration or deploy", () => {
+    // The workflow must fail early and explicitly, not deploy a Worker that
+    // discovers the binding is absent at its first request.
+    const steps = allSteps(PREFLIGHT);
+    const guardIndex = steps.findIndex((step) =>
+      JSON.stringify(step.env ?? {}).includes("vars.REGION_ID"),
+    );
+    const resolverIndex = steps.findIndex((step) => (step.run ?? "").includes("resolve-"));
+    const migrateIndex = steps.findIndex((step) => (step.run ?? "").includes("migrations apply"));
+    const deployIndex = steps.findIndex((step) => (step.run ?? "").includes("wrangler deploy"));
+    expect(guardIndex).toBeGreaterThanOrEqual(0);
+    expect(guardIndex).toBeLessThan(resolverIndex);
+    expect(resolverIndex).toBeLessThan(migrateIndex);
+    expect(migrateIndex).toBeLessThan(deployIndex);
+  });
 });
 
 describe("RELEASE carries the required gates", () => {
@@ -246,6 +295,25 @@ describe("RELEASE carries the required gates", () => {
     const runs = allRuns(RELEASE).join("\n");
     expect(runs).toContain("--mode release");
     expect(runs).not.toContain("--mode preflight");
+  });
+
+  it("passes the same application runtime variables as preflight", () => {
+    // Mode-specific properties may differ; the runtime application configuration
+    // must not. Both workflows must draw it from the one resolver boundary.
+    for (const workflow of [PREFLIGHT, RELEASE]) {
+      const resolverStep = allSteps(workflow).find((step) => (step.run ?? "").includes("resolve-"));
+      expect(resolverStep?.env).toMatchObject({
+        REGION_ID: "${{ vars.REGION_ID }}",
+        ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
+      });
+    }
+  });
+
+  it("takes application values from repository variables, never secrets", () => {
+    const resolverStep = allSteps(RELEASE).find((step) => (step.run ?? "").includes("resolve-"));
+    for (const [name, value] of Object.entries(resolverStep?.env ?? {})) {
+      expect(value, name).not.toContain("secrets.");
+    }
   });
 
   it("deploys against the generated release config, not the committed one", () => {

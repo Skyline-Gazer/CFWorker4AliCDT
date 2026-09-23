@@ -106,6 +106,34 @@ function generate(
   return { result, path };
 }
 
+/**
+ * The runtime configuration every deployment must carry.
+ *
+ * `REGION_ID` and `ECS_INSTANCE_ID` are required by `loadConfig()`, so a generated
+ * config that omits them deploys successfully and then fails at the first request.
+ * Tests that are not specifically about application variables supply them here so
+ * that unrelated assertions are not coupled to the required-variable guard.
+ */
+const RUNTIME_VARS: Record<string, string> = {
+  REGION_ID: "cn-hongkong",
+  ECS_INSTANCE_ID: "i-test-instance",
+};
+
+/** Extract the `vars` block from a generated config. */
+function varsOf(path: string): Record<string, unknown> {
+  return (readGenerated(path).vars ?? {}) as Record<string, unknown>;
+}
+
+/** The mode-specific arguments for a release, plus the required runtime vars. */
+function releaseEnv(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    D1_DATABASE_ID: FAKE_DATABASE_ID,
+    HTTP_EXPOSURE_MODE: "workers_dev",
+    ...RUNTIME_VARS,
+    ...extra,
+  };
+}
+
 /** Every scratch config this file wrote, so cleanup never touches anything else. */
 function listScratchFiles(): string[] {
   return readdirSync(REPO_ROOT)
@@ -120,20 +148,24 @@ afterAll(() => {
 describe("PRE-FLIGHT generation", () => {
   it("writes the generated config to the repository root by default", () => {
     const path = join(REPO_ROOT, "wrangler.preflight.jsonc");
-    const result = resolve("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID });
+    const result = resolve("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS });
     expect(result.status).toBe(0);
     expect(existsSync(path)).toBe(true);
     rmSync(path, { force: true });
   });
 
   it("fails closed when D1_DATABASE_ID is absent", () => {
-    const { result, path } = generate("preflight", {}, "preflight-no-id");
+    const { result, path } = generate("preflight", { ...RUNTIME_VARS }, "preflight-no-id");
     expect(result.status).not.toBe(0);
     expect(existsSync(path)).toBe(false);
   });
 
   it("injects the D1 database id into the TRAFFIC_DB binding", () => {
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-id");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-id",
+    );
     const config = readGenerated(path);
     const databases = config.d1_databases as { binding: string; database_id?: string }[];
     const traffic = databases.find((entry) => entry.binding === "TRAFFIC_DB");
@@ -142,29 +174,49 @@ describe("PRE-FLIGHT generation", () => {
 
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
-    generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-stable");
+    generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-stable",
+    );
     expect(readFileSync(SOURCE_CONFIG, "utf8")).toBe(before);
   });
 
   it("keeps 'main' resolving to the Worker entry point", () => {
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-main");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-main",
+    );
     const config = readGenerated(path);
     expect(config.main).toBe("src/index.ts");
     expect(existsSync(join(REPO_ROOT, config.main as string))).toBe(true);
   });
 
   it("enables preview_urls so a Version URL exists for live verification", () => {
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-prev");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-prev",
+    );
     expect(readGenerated(path).preview_urls).toBe(true);
   });
 
   it("keeps workers_dev disabled", () => {
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-wd");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-wd",
+    );
     expect(readGenerated(path).workers_dev).toBe(false);
   });
 
   it("declares no production route or custom domain", () => {
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-rte");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-rte",
+    );
     const config = readGenerated(path);
     expect(config.routes).toBeUndefined();
     expect(config.route).toBeUndefined();
@@ -174,14 +226,22 @@ describe("PRE-FLIGHT generation", () => {
     // An omitted `crons` leaves existing triggers in place; an empty array
     // removes them. Preflight must assert the removal, not merely decline to add
     // one — the two are different operations to Cloudflare.
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-cron");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-cron",
+    );
     const triggers = readGenerated(path).triggers as { crons?: unknown } | undefined;
     expect(triggers).toBeDefined();
     expect(triggers?.crons).toEqual([]);
   });
 
   it("does not require the release-only HTTP exposure decision", () => {
-    const { result } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-exp");
+    const { result } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-exp",
+    );
     expect(result.status).toBe(0);
   });
 
@@ -193,7 +253,11 @@ describe("PRE-FLIGHT generation", () => {
     //
     // A `--dry-run` does NOT catch this, because validation happens on the real
     // upload path. Hence a structural assertion on the generated config.
-    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-sec");
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-sec",
+    );
     const secrets = readGenerated(path).secrets as { required?: unknown } | undefined;
     expect(secrets?.required ?? []).toEqual([]);
   });
@@ -201,21 +265,13 @@ describe("PRE-FLIGHT generation", () => {
 
 describe("RELEASE generation — Cron authority", () => {
   it("restores the authoritative production Cron expression", () => {
-    const { path } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-cron",
-    );
+    const { path } = generate("release", releaseEnv(), "release-cron");
     const triggers = readGenerated(path).triggers as { crons?: unknown };
     expect(triggers.crons).toEqual(["*/10 * * * *"]);
   });
 
   it("injects the D1 database id", () => {
-    const { path } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-id",
-    );
+    const { path } = generate("release", releaseEnv(), "release-id");
     const databases = readGenerated(path).d1_databases as {
       binding: string;
       database_id?: string;
@@ -227,20 +283,12 @@ describe("RELEASE generation — Cron authority", () => {
 
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
-    generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-stable",
-    );
+    generate("release", releaseEnv(), "release-stable");
     expect(readFileSync(SOURCE_CONFIG, "utf8")).toBe(before);
   });
 
   it("does not retain the preflight preview exposure", () => {
-    const { path } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-prev",
-    );
+    const { path } = generate("release", releaseEnv(), "release-prev");
     expect(readGenerated(path).preview_urls).toBe(false);
   });
 
@@ -248,11 +296,7 @@ describe("RELEASE generation — Cron authority", () => {
     // The first deploy cannot declare `secrets.required`, because the Worker does
     // not exist yet to hold them. From the second deploy onward the Worker does
     // exist, so the fail-loudly-on-a-missing-secret guarantee is restored here.
-    const { path } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-secrets",
-    );
+    const { path } = generate("release", releaseEnv(), "release-secrets");
     const secrets = readGenerated(path).secrets as { required?: string[] } | undefined;
     expect(secrets?.required).toEqual([
       "ALIYUN_ACCESS_KEY_ID",
@@ -267,7 +311,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   it("fails closed when HTTP_EXPOSURE_MODE is absent", () => {
     const { result, path } = generate(
       "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID },
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
       "release-no-exposure",
     );
     expect(result.status).not.toBe(0);
@@ -278,7 +322,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   it("fails closed on an unrecognised HTTP_EXPOSURE_MODE", () => {
     const { result, path } = generate(
       "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "public" },
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "public", ...RUNTIME_VARS },
       "release-bad-exposure",
     );
     expect(result.status).not.toBe(0);
@@ -288,7 +332,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   it("fails closed on a blank HTTP_EXPOSURE_MODE", () => {
     const { result, path } = generate(
       "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "   " },
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "   ", ...RUNTIME_VARS },
       "release-blank-exposure",
     );
     expect(result.status).not.toBe(0);
@@ -296,11 +340,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   });
 
   it("workers_dev mode enables workers.dev and declares no route", () => {
-    const { path } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-workers-dev",
-    );
+    const { path } = generate("release", releaseEnv(), "release-workers-dev");
     const config = readGenerated(path);
     expect(config.workers_dev).toBe(true);
     expect(config.routes).toBeUndefined();
@@ -314,6 +354,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
         D1_DATABASE_ID: FAKE_DATABASE_ID,
         HTTP_EXPOSURE_MODE: "custom_domain",
         WORKER_CUSTOM_DOMAIN: "worker.example.com",
+        ...RUNTIME_VARS,
       },
       "release-custom-domain",
     );
@@ -325,7 +366,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   it("fails closed when custom_domain is selected without a domain", () => {
     const { result, path } = generate(
       "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "custom_domain" },
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "custom_domain", ...RUNTIME_VARS },
       "release-no-domain",
     );
     expect(result.status).not.toBe(0);
@@ -340,6 +381,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
         D1_DATABASE_ID: FAKE_DATABASE_ID,
         HTTP_EXPOSURE_MODE: "custom_domain",
         WORKER_CUSTOM_DOMAIN: "   ",
+        ...RUNTIME_VARS,
       },
       "release-blank-domain",
     );
@@ -355,6 +397,7 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
           D1_DATABASE_ID: FAKE_DATABASE_ID,
           HTTP_EXPOSURE_MODE: "custom_domain",
           WORKER_CUSTOM_DOMAIN: malformed,
+          ...RUNTIME_VARS,
         },
         "release-malformed-domain",
       );
@@ -364,19 +407,305 @@ describe("RELEASE generation — HTTP exposure is an explicit owner choice", () 
   });
 
   it("refuses an output path outside the repository root", () => {
-    const result = resolve("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "/tmp/outside.jsonc");
+    const result = resolve(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "/tmp/outside.jsonc",
+    );
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("repository root");
   });
 
   it("never prints the resolved database id", () => {
-    const { result } = generate(
-      "release",
-      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
-      "release-no-print",
-    );
+    const { result } = generate("release", releaseEnv(), "release-no-print");
     expect(result.stdout).not.toContain(FAKE_DATABASE_ID);
     expect(result.stderr).not.toContain(FAKE_DATABASE_ID);
+  });
+});
+
+describe("application runtime configuration is injected into every mode", () => {
+  // `loadConfig()` requires REGION_ID and ECS_INSTANCE_ID. A generated config that
+  // omits them deploys successfully and then fails at the first request, which is
+  // the worst possible moment to discover a missing binding. So the resolver must
+  // fail *before* generating, not let the deployment discover it later.
+
+  it("injects REGION_ID and ECS_INSTANCE_ID into the preflight config", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-region-pf",
+    );
+    const vars = varsOf(path);
+    expect(vars.REGION_ID).toBe(RUNTIME_VARS.REGION_ID);
+    expect(vars.ECS_INSTANCE_ID).toBe(RUNTIME_VARS.ECS_INSTANCE_ID);
+  });
+
+  it("injects REGION_ID and ECS_INSTANCE_ID into the release config", () => {
+    const { path } = generate("release", releaseEnv(), "app-region-rel");
+    const vars = varsOf(path);
+    expect(vars.REGION_ID).toBe(RUNTIME_VARS.REGION_ID);
+    expect(vars.ECS_INSTANCE_ID).toBe(RUNTIME_VARS.ECS_INSTANCE_ID);
+  });
+
+  it("trims surrounding whitespace from the required values", () => {
+    const { path } = generate(
+      "preflight",
+      {
+        D1_DATABASE_ID: FAKE_DATABASE_ID,
+        REGION_ID: "  cn-hongkong  ",
+        ECS_INSTANCE_ID: "\ti-trimmed \n",
+      },
+      "app-trim",
+    );
+    const vars = varsOf(path);
+    expect(vars.REGION_ID).toBe("cn-hongkong");
+    expect(vars.ECS_INSTANCE_ID).toBe("i-trimmed");
+  });
+
+  it("retains the committed default when no threshold override is supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-thr-def",
+    );
+    expect(varsOf(path).TRAFFIC_THRESHOLD_GB).toBe("180");
+  });
+
+  it("applies a threshold override when supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS, TRAFFIC_THRESHOLD_GB: "250" },
+      "app-thr-ovr",
+    );
+    expect(varsOf(path).TRAFFIC_THRESHOLD_GB).toBe("250");
+  });
+
+  it("retains the committed default when no CDT endpoint override is supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-cdt-def",
+    );
+    expect(varsOf(path).CDT_ENDPOINT).toBe("cdt.aliyuncs.com");
+  });
+
+  it("applies a CDT endpoint override when supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS, CDT_ENDPOINT: "cdt.example.test" },
+      "app-cdt-ovr",
+    );
+    expect(varsOf(path).CDT_ENDPOINT).toBe("cdt.example.test");
+  });
+
+  it("leaves BUSINESS_REGION_ID absent when it is not supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-br-absent",
+    );
+    expect(varsOf(path)).not.toHaveProperty("BUSINESS_REGION_ID");
+  });
+
+  it("includes BUSINESS_REGION_ID when supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS, BUSINESS_REGION_ID: "cn-hongkong" },
+      "app-br-present",
+    );
+    expect(varsOf(path).BUSINESS_REGION_ID).toBe("cn-hongkong");
+  });
+
+  it("retains the committed default when no signature override is supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-sig-def",
+    );
+    expect(varsOf(path).SIGNATURE_VERSION).toBe("v3");
+  });
+
+  it("applies a signature override when supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS, SIGNATURE_VERSION: "v2" },
+      "app-sig-ovr",
+    );
+    expect(varsOf(path).SIGNATURE_VERSION).toBe("v2");
+  });
+
+  it("retains the committed default when no stopped-mode override is supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-stop-def",
+    );
+    expect(varsOf(path).STOPPED_MODE).toBe("KeepCharging");
+  });
+
+  it("applies a stopped-mode override when supplied", () => {
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS, STOPPED_MODE: "StopCharging" },
+      "app-stop-ovr",
+    );
+    expect(varsOf(path).STOPPED_MODE).toBe("StopCharging");
+  });
+
+  it("preserves the non-application D1 binding alongside the injected vars", () => {
+    // The two classes of configuration must not be confused: injecting runtime
+    // vars must not disturb the deployment-only D1 binding.
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "app-d1-kept",
+    );
+    const databases = readGenerated(path).d1_databases as {
+      binding: string;
+      database_id?: string;
+    }[];
+    expect(databases.find((entry) => entry.binding === "TRAFFIC_DB")?.database_id).toBe(
+      FAKE_DATABASE_ID,
+    );
+  });
+});
+
+describe("required application variables fail closed", () => {
+  // Deployment completeness is the resolver's job. Runtime *semantic* validation
+  // (is the threshold a number > 0, is the signature version v2/v3) remains
+  // `loadConfig()`'s job and is deliberately not duplicated here.
+
+  for (const [label, env] of [
+    ["REGION_ID absent", { ECS_INSTANCE_ID: "i-test" }],
+    ["REGION_ID blank", { REGION_ID: "   ", ECS_INSTANCE_ID: "i-test" }],
+    ["ECS_INSTANCE_ID absent", { REGION_ID: "cn-hongkong" }],
+    ["ECS_INSTANCE_ID blank", { REGION_ID: "cn-hongkong", ECS_INSTANCE_ID: "\t\n " }],
+  ] as const) {
+    it(`preflight fails and produces no artifact when ${label}`, () => {
+      const { result, path } = generate(
+        "preflight",
+        { D1_DATABASE_ID: FAKE_DATABASE_ID, ...env },
+        "app-missing",
+      );
+      expect(result.status).not.toBe(0);
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it(`release fails and produces no artifact when ${label}`, () => {
+      const { result, path } = generate(
+        "release",
+        { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev", ...env },
+        "app-missing-rel",
+      );
+      expect(result.status).not.toBe(0);
+      expect(existsSync(path)).toBe(false);
+    });
+  }
+
+  it("names the missing binding without printing any value", () => {
+    const secretishRegion = "cn-hongkong-secret-region-value";
+    const { result } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, REGION_ID: secretishRegion },
+      "app-name-only",
+    );
+    expect(result.status).not.toBe(0);
+    // The *name* of the offending binding is the only thing that may appear. A
+    // value from the environment must never reach CI logs.
+    expect(result.stderr).toContain("ECS_INSTANCE_ID");
+    expect(result.stderr).not.toContain(secretishRegion);
+    expect(result.stdout).not.toContain(secretishRegion);
+  });
+
+  it("does not print an optional override value either", () => {
+    const overrideValue = "cdt-distinctive-override-value.test";
+    const { result } = generate(
+      "preflight",
+      {
+        D1_DATABASE_ID: FAKE_DATABASE_ID,
+        ...RUNTIME_VARS,
+        CDT_ENDPOINT: overrideValue,
+        ECS_INSTANCE_ID: "",
+      },
+      "app-opt-no-print",
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain(overrideValue);
+    expect(result.stdout).not.toContain(overrideValue);
+  });
+});
+
+describe("deployment mode must not change application configuration", () => {
+  // Mode-specific properties (Cron, preview URL, workers.dev / custom domain,
+  // required-secret declaration) may differ. The runtime application
+  // configuration must not. If it did, the verified preflight behaviour would
+  // stop describing what RELEASE actually runs.
+
+  it("derives identical application vars from both modes for identical inputs", () => {
+    const inputs = {
+      D1_DATABASE_ID: FAKE_DATABASE_ID,
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-parity",
+      TRAFFIC_THRESHOLD_GB: "200",
+      CDT_ENDPOINT: "cdt.parity.test",
+      BUSINESS_REGION_ID: "cn-shanghai",
+      SIGNATURE_VERSION: "v2",
+      STOPPED_MODE: "StopCharging",
+    };
+    const preflight = generate("preflight", inputs, "parity-pf");
+    const release = generate(
+      "release",
+      { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" },
+      "parity-rel",
+    );
+
+    expect(varsOf(preflight.path)).toEqual(varsOf(release.path));
+  });
+
+  it("keeps application vars equal even when the release exposure mode differs", () => {
+    const inputs = {
+      D1_DATABASE_ID: FAKE_DATABASE_ID,
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-parity-2",
+    };
+    const workersDev = generate(
+      "release",
+      { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" },
+      "parity-wd",
+    );
+    const customDomain = generate(
+      "release",
+      {
+        ...inputs,
+        HTTP_EXPOSURE_MODE: "custom_domain",
+        WORKER_CUSTOM_DOMAIN: "worker.example.com",
+      },
+      "parity-cd",
+    );
+    expect(varsOf(workersDev.path)).toEqual(varsOf(customDomain.path));
+  });
+
+  it("differs between modes only in the documented mode-specific properties", () => {
+    const inputs = {
+      D1_DATABASE_ID: FAKE_DATABASE_ID,
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-parity-3",
+    };
+    const preflight = readGenerated(generate("preflight", inputs, "parity-diff-pf").path);
+    const release = readGenerated(
+      generate("release", { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" }, "parity-diff-rel").path,
+    );
+
+    const differingKeys = Object.keys({ ...preflight, ...release }).filter(
+      (key) => JSON.stringify(preflight[key]) !== JSON.stringify(release[key]),
+    );
+    // Exactly the mode-specific set, and nothing else.
+    expect([...differingKeys].sort()).toEqual([
+      "preview_urls",
+      "secrets",
+      "triggers",
+      "workers_dev",
+    ]);
   });
 });
 
@@ -407,7 +736,7 @@ describe("resolver modes", () => {
   });
 
   it("rejects an unknown --mode", () => {
-    const result = resolve("bogus", { D1_DATABASE_ID: FAKE_DATABASE_ID });
+    const result = resolve("bogus", { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS });
     expect(result.status).not.toBe(0);
   });
 });
