@@ -151,13 +151,20 @@ to D1 is redacted more than once.
 
 ## Deployment shape
 
-- `wrangler.jsonc` is the source of truth.
-- Cron `*/10 * * * *`, UTC, 5-field.
-- `workers_dev: false`. There is no unauthenticated control surface.
+- `wrangler.jsonc` is the source of truth, and is never mutated by a deployment.
+- Cron `*/10 * * * *`, UTC, 5-field — **enabled by RELEASE only**.
+- The first deployment is two owner actions. PRE-FLIGHT creates the Worker with
+  `triggers.crons = []` and a Version URL; verification is read-only against that
+  URL; RELEASE restores Cron and the chosen HTTP endpoint. Nothing chains them.
+- HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`) with
+  no default. `workers_dev: false` plus no route means the production dashboard has
+  no stable endpoint until that choice is made.
 - `secrets.required` is declared so a deployment missing a secret fails loudly rather
   than at the first scheduled run.
 - The D1 binding is declared without a `database_id`; a real identifier is supplied at
-  deploy time and never committed.
+  deploy time and never committed. The generated configs
+  (`wrangler.preflight.jsonc`, `wrangler.deploy.jsonc`) live at the repository root
+  — Wrangler resolves `main` relative to the config's directory — and are gitignored.
 - CI holds no credentials and performs no deployment.
 
 ## References

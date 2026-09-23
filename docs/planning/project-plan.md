@@ -621,19 +621,45 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
 
 ## 14. Deployment model
 
-- Cloudflare Worker, deployed with Wrangler, `wrangler.jsonc` as the source of truth.
+- Cloudflare Worker, deployed with Wrangler, `wrangler.jsonc` as the source of truth
+  and never mutated by a deployment.
 - Cron Trigger `*/10 * * * *` (every 10 minutes), UTC, 5-field syntax.
-- `workers_dev` remains disabled. The dashboard is reached on the configured route, and
-  the route is authenticated.
+- **The first deployment is two owner actions**, because Cron is the only mutation
+  authority and the one assumption that can fail unsafely (the traffic unit) is only
+  checkable against live data:
+  - **PRE-FLIGHT** performs the first `wrangler deploy` with `triggers.crons = []`,
+    `workers_dev: false`, no route, and `preview_urls: true`. That exposes a Version
+    URL for read-only live verification and no stable endpoint. Cloudflare documents
+    that an empty `crons` array *removes* Cron Triggers whereas an omitted field
+    leaves existing ones in place, so the field is written explicitly.
+  - **RELEASE** is a separate, explicitly authorized dispatch that restores Cron and
+    applies the owner's HTTP exposure choice. It is never triggered by PRE-FLIGHT.
+  - The preflight config also declares `secrets: { required: [] }`, because Wrangler
+    refuses to deploy a new Worker that declares required secrets it cannot yet hold
+    ("This Worker does not exist yet, so secrets cannot be set in advance"). RELEASE
+    restores the full list, so the fail-loudly-on-a-missing-secret guarantee applies
+    from the first release onward. A dry-run does not surface this constraint.
+  - This replaces the earlier flow of `wrangler versions upload` → verify →
+    `versions deploy`, which cannot work for the first Worker upload: Cloudflare
+    documents that `wrangler versions upload` fails the first time a new Worker is
+    uploaded. It becomes useful only *after* a Worker exists; no update workflow that
+    uses it is implemented yet.
+- **HTTP exposure is an explicit owner choice**, not an inferred one:
+  `HTTP_EXPOSURE_MODE` is `workers_dev` or `custom_domain`, with no default, and the
+  resolver fails closed when it is absent, unrecognised, or `custom_domain` without a
+  well-formed `WORKER_CUSTOM_DOMAIN`. These are deployment-only values, not Worker
+  runtime variables, and are deliberately not added to the SPEC's seven.
 - Secrets set via `wrangler secret put`; never via `vars`, never via a committed file.
 - D1 database created via Wrangler; `database_id` supplied from a repository
   variable/secret, never committed, never rewritten into config by a CI script (D8).
+  The generated configs are written to the repository root, because Wrangler treats
+  the config's directory as the project root.
 - Migrations applied with `wrangler d1 migrations apply` as a distinct, visible step
-  before deploy — never implicitly.
+  before deploy — never implicitly, in both stages.
 - Local development uses `.dev.vars` (gitignored) with obvious fake values.
 - Deployment is manual and gated on owner confirmation of: Worker config, RAM policy,
   region, instance ID, threshold, cron expression, presence of all secrets, D1 binding,
-  and the webhook target. Credential values are never printed.
+  the HTTP exposure decision, and the webhook target. Credential values are never printed.
 - CI validates by installing, formatting, linting, type-checking, and running tests. CI
   performs **no** deployment and makes **no** live API call.
 
