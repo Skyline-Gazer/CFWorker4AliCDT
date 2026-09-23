@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run deploy:dry-run"
   },
   "dependencies": {
     "zod": "^3.25.76"

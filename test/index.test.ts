@@ -52,7 +52,9 @@ describe("scheduled — configuration failure aborts before any Alibaba call", (
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        alibaba.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        alibaba.push(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+        );
         return Promise.resolve(new Response("{}", { status: 200 }));
       });
     // Missing ECS_INSTANCE_ID: a config error.
@@ -66,7 +68,9 @@ describe("scheduled — configuration failure aborts before any Alibaba call", (
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        seen.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        seen.push(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+        );
         return Promise.resolve(new Response("{}", { status: 200 }));
       });
     await worker.scheduled({} as ScheduledController, env({ ECS_INSTANCE_ID: "" }), ctx());
@@ -94,7 +98,8 @@ describe("scheduled — a run must not be able to throw", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (url.includes("/run")) return Promise.reject(new Error("webhook exploded"));
         return Promise.reject(new Error("upstream down"));
       });
@@ -128,7 +133,8 @@ describe("scheduled — attempts reporting on every run (SPEC §7.2, §9.2)", ()
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         seen.push(url);
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
         return Promise.reject(new Error("upstream down"));
@@ -144,7 +150,8 @@ describe("scheduled — attempts reporting on every run (SPEC §7.2, §9.2)", ()
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         seen.push(url);
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
         // CDT then ECS describe, both plausible successes.
@@ -317,7 +324,8 @@ describe("scheduled — history and control are independent (SPEC §9.6, A11)", 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         seen.push(url);
         if (typeof init?.body === "string") seen.push(init.body);
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
@@ -371,7 +379,8 @@ describe("scheduled — history and control are independent (SPEC §9.6, A11)", 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
         if (url.includes("cdt.")) {
           return Promise.resolve(
