@@ -90,6 +90,11 @@ added to this table.
 | A D1 database exists for the binding, or a decision to run without history is recorded. | ☐ |
 | The HTTP exposure decision has been made (see §3c), or a record exists of choosing none. | ☐ |
 
+**Set the secrets before RELEASE.** The PRE-FLIGHT deploy cannot declare
+`secrets.required` (the Worker does not exist yet — see §3b), so an unset secret is
+not caught until RELEASE, where the deployment fails loudly. Setting all five
+secrets during preflight is the safe order.
+
 ## 2. Setting secrets
 
 Each command prompts; the value is not echoed, not stored in history, and not
@@ -157,6 +162,20 @@ and `triggers.crons = []`.
 `crons` is **`undefined`**, the currently deployed Cron Triggers are left in place.
 Omitting the field would be a silent "change nothing", which is not the same
 operation as "have no schedule".
+
+**Why the preflight config also omits `secrets.required`.** Wrangler validates
+`secrets.required` at deploy time, and a Worker that does not exist yet cannot hold
+secrets — it refuses with *"This Worker does not exist yet, so secrets cannot be
+set in advance with `wrangler secret put`."* So a first deploy that declared
+`secrets.required` could never succeed. The preflight config therefore declares
+`required: []`, and **RELEASE restores the full list**, where the Worker exists and
+the fail-loudly-on-a-missing-secret guarantee applies.
+
+This is a real constraint on the bootstrap order, not a relaxed safety property:
+from the first *release* onward, a missing secret still fails the deployment loudly.
+Note also that `wrangler deploy --dry-run` does **not** surface it, because the
+validation runs on the real upload path — which is why it is asserted structurally
+in `test/deploy/config-resolution.test.ts`.
 
 The deploy reports a **Version URL**. That URL exists even with `workers_dev =
 false`, provided `preview_urls` is enabled.
@@ -263,6 +282,8 @@ the deploy so the schema exists before a Worker version that writes to it is liv
 ### 3f. Version URL lifecycle
 
 - **PRE-FLIGHT:** `preview_urls = true`, so a Version URL exists for verification.
+  Its config also declares `secrets: { required: [] }`, because Wrangler refuses to
+  deploy a new Worker that lists required secrets it cannot yet hold.
 - **RELEASE:** `preview_urls = false`, so the temporary verification exposure is not
   retained. Version URLs are public while they exist; a Version URL runs the
   uploaded version against **production** resources, so it is a verification window,

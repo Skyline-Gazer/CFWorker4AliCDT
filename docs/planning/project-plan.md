@@ -634,6 +634,11 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
     leaves existing ones in place, so the field is written explicitly.
   - **RELEASE** is a separate, explicitly authorized dispatch that restores Cron and
     applies the owner's HTTP exposure choice. It is never triggered by PRE-FLIGHT.
+  - The preflight config also declares `secrets: { required: [] }`, because Wrangler
+    refuses to deploy a new Worker that declares required secrets it cannot yet hold
+    ("This Worker does not exist yet, so secrets cannot be set in advance"). RELEASE
+    restores the full list, so the fail-loudly-on-a-missing-secret guarantee applies
+    from the first release onward. A dry-run does not surface this constraint.
   - This replaces the earlier flow of `wrangler versions upload` → verify →
     `versions deploy`, which cannot work for the first Worker upload: Cloudflare
     documents that `wrangler versions upload` fails the first time a new Worker is

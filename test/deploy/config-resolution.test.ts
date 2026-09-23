@@ -184,6 +184,19 @@ describe("PRE-FLIGHT generation", () => {
     const { result } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-exp");
     expect(result.status).toBe(0);
   });
+
+  it("does not declare required secrets, because the Worker does not exist yet", () => {
+    // Cloudflare/Wrangler constraint: `secrets.required` is validated at deploy
+    // time, and a NEW Worker cannot have secrets set in advance — Wrangler refuses
+    // with "This Worker does not exist yet, so secrets cannot be set in advance".
+    // So a first deploy that declared `secrets.required` could never succeed.
+    //
+    // A `--dry-run` does NOT catch this, because validation happens on the real
+    // upload path. Hence a structural assertion on the generated config.
+    const { path } = generate("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID }, "preflight-sec");
+    const secrets = readGenerated(path).secrets as { required?: unknown } | undefined;
+    expect(secrets?.required ?? []).toEqual([]);
+  });
 });
 
 describe("RELEASE generation — Cron authority", () => {
@@ -229,6 +242,24 @@ describe("RELEASE generation — Cron authority", () => {
       "release-prev",
     );
     expect(readGenerated(path).preview_urls).toBe(false);
+  });
+
+  it("restores the required-secret validation the preflight stage had to omit", () => {
+    // The first deploy cannot declare `secrets.required`, because the Worker does
+    // not exist yet to hold them. From the second deploy onward the Worker does
+    // exist, so the fail-loudly-on-a-missing-secret guarantee is restored here.
+    const { path } = generate(
+      "release",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, HTTP_EXPOSURE_MODE: "workers_dev" },
+      "release-secrets",
+    );
+    const secrets = readGenerated(path).secrets as { required?: string[] } | undefined;
+    expect(secrets?.required).toEqual([
+      "ALIYUN_ACCESS_KEY_ID",
+      "ALIYUN_ACCESS_KEY_SECRET",
+      "WEBHOOK_URL",
+      "ADMIN_TOKEN",
+    ]);
   });
 });
 

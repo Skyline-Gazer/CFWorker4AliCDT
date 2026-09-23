@@ -165,6 +165,24 @@ In the meantime: this is why the summation is asserted against an independently
 computed expectation, and why an empty `TrafficDetails` array is treated as
 **invalid rather than as zero** (PLAN §5.1, SPEC §5.5).
 
+### A12 — A first deploy cannot declare `secrets.required`
+Evidence: **documented and verified in the Wrangler implementation.** Wrangler
+validates `secrets.required` at deploy time. For a Worker that does not yet exist it
+fails with *"This Worker does not exist yet, so secrets cannot be set in advance
+with `wrangler secret put`."* The check is in
+`addRequiredSecretsInheritBindings` and it distinguishes `type: "deploy"` from
+`type: "upload"` precisely for `workerExists === false`.
+How to verify: not applicable — this is current Wrangler behaviour, and it is
+asserted structurally in `test/deploy/config-resolution.test.ts`.
+If wrong: the first deployment fails, loudly, before any Worker runs. It fails
+**closed**, and the remedy is to scaffold the Worker another way or pass secrets on
+the command line — neither of which is wanted.
+In the meantime: the PRE-FLIGHT generated config declares `secrets: { required: [] }`,
+so the first deploy can succeed; **RELEASE restores the full required list**, so from
+the first release onward a missing secret still fails the deployment loudly. Note
+that `wrangler deploy --dry-run` does **not** surface this, because validation runs
+on the real upload path.
+
 ## 3. Recorded corrections to the originating brief
 
 | Brief claim | Correction | Source |

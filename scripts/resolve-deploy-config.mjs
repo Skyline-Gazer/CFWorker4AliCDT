@@ -150,6 +150,20 @@ function injectDatabaseId(binding) {
  * while `undefined` leaves whatever is currently deployed in place. Omitting the
  * field would therefore be a silent "do not change anything", which is not the
  * same operation as "have no Cron Trigger".
+ *
+ * `secrets.required` is ALSO emptied, and that is not a relaxation of a safety
+ * property — it is the only way this deploy can succeed. Wrangler validates
+ * `secrets.required` at deploy time, and a Worker that does not exist yet cannot
+ * hold secrets:
+ *
+ *   "This Worker does not exist yet, so secrets cannot be set in advance with
+ *    `wrangler secret put`."
+ *
+ * So a first deploy that declared `secrets.required` would fail outright, and the
+ * owner's only alternatives would be to scaffold the Worker some other way or to
+ * pass every secret on the command line. Neither is desirable. The check is
+ * restored by RELEASE, where the Worker exists. Note that a `--dry-run` does not
+ * catch this, because the validation runs on the real upload path.
  */
 function applyPreflight(config) {
   config.workers_dev = false;
@@ -157,6 +171,7 @@ function applyPreflight(config) {
   delete config.routes;
   delete config.route;
   config.triggers = { crons: [] };
+  config.secrets = { required: [] };
 }
 
 /**
