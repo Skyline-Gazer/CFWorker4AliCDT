@@ -20,7 +20,7 @@
 
 import type { DecisionAction } from "../monitor/decision";
 import type { ErrorStage } from "../monitor/execute";
-import { redact } from "../notify/webhook";
+import { redact } from "../redact";
 
 /** One row of `traffic_checks`. `null` is the storage form of "unknown". */
 export interface RowInsert {

@@ -22,7 +22,7 @@
  */
 
 import type { HistoryRow } from "../storage/read";
-import { redact } from "../notify/webhook";
+import { redact } from "../redact";
 
 /** What the dashboard renders from. */
 export interface DashboardInput {
