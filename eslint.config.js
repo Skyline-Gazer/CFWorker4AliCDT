@@ -11,6 +11,11 @@ export default tseslint.config(
       // Config files are not part of the typed project.
       "eslint.config.js",
       "vitest.config.ts",
+      // A build-time Node script, not part of the Worker's typed program (it is
+      // `.mjs` and `allowJs` is off by design, so the Worker's own types stay
+      // authoritative). It is covered by execution tests instead: it is asserted
+      // to exit non-zero without `D1_DATABASE_ID` and to inject the id with it.
+      "scripts/*.mjs",
     ],
   },
   js.configs.recommended,
