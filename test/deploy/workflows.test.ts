@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const WORKFLOWS_DIR = join(import.meta.dirname, "..", "..", ".github", "workflows");
+const DEPLOYMENT_DOC = join(WORKFLOWS_DIR, "..", "..", "docs", "operations", "deployment.md");
 
 interface Step {
   readonly name?: string;
@@ -115,6 +116,66 @@ describe("workflow dispatch and PR isolation", () => {
     expect(ciText).not.toContain("secrets.");
     expect(ciText).not.toContain("CLOUDFLARE_API_TOKEN");
     expect(text(ci)).toContain("pull_request");
+  });
+});
+
+describe("deployment trust boundary", () => {
+  for (const [label, workflow] of [
+    ["preflight.yml", PREFLIGHT],
+    ["release.yml", RELEASE],
+  ] as const) {
+    it(`${label} targets the production Environment`, () => {
+      const jobs = Object.values(workflow.jobs ?? {});
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const job of jobs) expect(environmentName(job)).toBe("production");
+    });
+
+    it(`${label} rejects non-main refs before checkout, migration, or deploy`, () => {
+      const steps = allSteps(workflow);
+      const guardIndex = steps.findIndex(
+        (step) => step.if?.includes("github.ref") && step.if.includes("refs/heads/main"),
+      );
+      expect(guardIndex).toBe(0);
+      expect(steps[guardIndex]?.if).toContain("!=");
+      expect(steps[guardIndex]?.run).toContain("exit 1");
+
+      const checkoutIndex = steps.findIndex((step) => step.uses?.startsWith("actions/checkout@"));
+      const migrationIndex = steps.findIndex((step) =>
+        (step.run ?? "").includes("migrations apply"),
+      );
+      const deployIndex = steps.findIndex((step) => (step.run ?? "").includes("wrangler deploy"));
+      for (const index of [checkoutIndex, migrationIndex, deployIndex]) {
+        expect(index).toBeGreaterThan(guardIndex);
+      }
+    });
+
+    it(`${label} reads Cloudflare deployment credentials from the secret context`, () => {
+      const credentialEnvs = allSteps(workflow)
+        .map((step) => step.env)
+        .filter((env) => env?.CLOUDFLARE_API_TOKEN !== undefined);
+      expect(credentialEnvs.length).toBeGreaterThan(0);
+      for (const env of credentialEnvs) {
+        expect(env?.CLOUDFLARE_API_TOKEN).toBe("${{ secrets.CLOUDFLARE_API_TOKEN }}");
+        expect(env?.CLOUDFLARE_ACCOUNT_ID).toBe("${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
+      }
+    });
+  }
+
+  it("PRE-FLIGHT cannot dispatch or chain into RELEASE", () => {
+    expect(PREFLIGHT.on).not.toHaveProperty("workflow_run");
+    expect(PREFLIGHT.on).not.toHaveProperty("workflow_call");
+    expect(allRuns(PREFLIGHT).join("\n")).not.toMatch(/gh\s+workflow\s+run\s+release/i);
+  });
+
+  it("documents the mandatory Environment boundary and keeps runtime config in repository variables", () => {
+    const doc = readFileSync(DEPLOYMENT_DOC, "utf8");
+    expect(doc).toContain("**required reviewers enabled**");
+    expect(doc).toContain("deployment branches/tags **restricted to `main` only**");
+    expect(doc).toContain("| `CLOUDFLARE_API_TOKEN` | Secret | **`production` Environment** |");
+    expect(doc).toContain("| `CLOUDFLARE_ACCOUNT_ID` | Secret | **`production` Environment** |");
+    expect(doc).toContain("Keep `REGION_ID`");
+    expect(doc).toContain("`D1_DATABASE_ID`");
+    expect(doc).toContain("ref guard is supplementary");
   });
 });
 
@@ -274,7 +335,7 @@ describe("RELEASE carries the required gates", () => {
     // A defaulted input would make the gate decorative. Every confirmation must
     // be `required` and must have no default.
     const raw = readFileSync(join(WORKFLOWS_DIR, "release.yml"), "utf8");
-    const confirmInputs = ["confirmation", "LIVE_READ_ONLY_VERIFIED"];
+    const confirmInputs = ["confirmation", "LIVE_READ_ONLY_VERIFIED", "HTTP_EXPOSURE_MODE"];
     for (const name of confirmInputs) {
       const block = new RegExp(`${name}:\\n(?:.*\\n)*?\\s+required: true`);
       expect(raw, name).toMatch(block);
@@ -303,6 +364,7 @@ describe("RELEASE carries the required gates", () => {
     for (const workflow of [PREFLIGHT, RELEASE]) {
       const resolverStep = allSteps(workflow).find((step) => (step.run ?? "").includes("resolve-"));
       expect(resolverStep?.env).toMatchObject({
+        D1_DATABASE_ID: "${{ vars.D1_DATABASE_ID }}",
         REGION_ID: "${{ vars.REGION_ID }}",
         ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
       });
