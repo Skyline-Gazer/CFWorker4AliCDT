@@ -25,6 +25,10 @@ name: Release deploy (Cron authority)
 #    dashboard is reachable is a deployment decision, not an inferred one. The
 #    resolver fails closed when it is absent or unrecognised.
 #
+# RELEASE also restores `secrets.required`, which PRE-FLIGHT had to clear because a
+# Worker that does not exist yet cannot hold secrets. From here on, a deployment
+# missing a required secret fails loudly.
+#
 # Every confirmation is `required` and has no default value, because a boolean with
 # a default is a gate that passes when nobody looks at it.
 #

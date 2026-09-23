@@ -16,6 +16,10 @@ name: Preflight deploy (read-only verification)
 #    triggers in place. The distinction is why the resolver writes `[]` rather than
 #    deleting the key.
 #
+#    The same mode also clears `secrets.required`, because Wrangler refuses to
+#    deploy a Worker that does not exist yet while it lists secrets that cannot be
+#    set in advance. RELEASE restores the list.
+#
 # 2. **No stable production HTTP endpoint.** `workers_dev = false` and no route, so
 #    there is no inbound control surface to forget about. A Version URL is exposed
 #    instead (`preview_urls = true`), which is what the owner verifies against.
@@ -111,6 +115,11 @@ jobs:
       # `--mode preflight` is what writes `triggers.crons = []`. It is not a
       # formatting detail: it is the difference between this Worker having no Cron
       # Trigger and this Worker inheriting whatever is already deployed.
+      #
+      # It also writes `secrets.required: []`. That is a Wrangler constraint, not a
+      # relaxed safety check: a Worker that does not exist yet cannot hold secrets,
+      # so a first deploy declaring them is refused outright. RELEASE restores the
+      # full list. Set the secrets during this stage anyway; see deployment.md §1.
       - name: Resolve preflight configuration
         env:
           D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
@@ -155,6 +164,10 @@ jobs:
           echo "  4. The query performed no StartInstance, no StopInstance, no D1 history write,"
           echo "     and dispatched no webhook."
           echo "  5. The returned traffic matches the Alibaba console for the same period."
+          echo ""
+          echo "Set all five secrets before RELEASE. Preflight cannot require them"
+          echo "(a new Worker cannot hold secrets), so RELEASE is where an unset secret"
+          echo "fails the deployment."
           echo ""
           echo "Only then may RELEASE be dispatched. Scheduled mutation authority is"
           echo "enabled by RELEASE and by nothing else; this workflow never promotes itself."
