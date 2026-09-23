@@ -377,13 +377,18 @@ const { DatabaseSync } = require("node:sqlite") as {
 // cost of that choice is that the two can drift, and the place it would surface
 // is the P8 wiring (#27), long after this phase closed.
 //
-// This assignment is a compile-time assertion: CI runs `typecheck` over the test
-// tree, so if a future change to `RunReport` makes it unsatisfiable here, this
-// phase's own tests fail instead of the wiring failing later.
+// This is a type-level assertion that emits no meaningful runtime value: if a
+// future change to `RunReport` makes it incompatible, the conditional resolves
+// to `never` and the assignment below stops compiling. CI runs `typecheck` over
+// the test tree, so this phase's tests fail instead of the wiring failing later.
+//
+// Deliberately NOT written as `const x: HistoryReport = someDeclaredConst`: a
+// `declare const` is erased at runtime, so that form type-checks but throws
+// `ReferenceError` when the file is actually loaded.
 // ---------------------------------------------------------------------------
 
-declare const realRunReport: RunReport;
-export const runReportSatisfiesHistoryReport: HistoryReport = realRunReport;
+type RunReportSatisfiesHistoryReport = RunReport extends HistoryReport ? true : never;
+export const runReportSatisfiesHistoryReport: RunReportSatisfiesHistoryReport = true;
 
 const MIGRATIONS_DIR = join(import.meta.dirname, "..", "..", "migrations");
 
