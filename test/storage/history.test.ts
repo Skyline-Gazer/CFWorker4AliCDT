@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildRow, recordRun, controlOk } from "../../src/storage/history";
 import type { HistoryReport, RowInsert } from "../../src/storage/history";
+import type { RunReport } from "../../src/monitor/execute";
 
 /**
  * D1 monitoring history write path (SPEC §9.6).
@@ -367,6 +368,27 @@ interface Database {
 const { DatabaseSync } = require("node:sqlite") as {
   DatabaseSync: new (path: string) => Database;
 };
+
+// ---------------------------------------------------------------------------
+// Cross-phase integration pin.
+//
+// `HistoryReport` restates part of `RunReport`'s shape rather than importing it,
+// so that the storage module does not depend on the orchestration module. The
+// cost of that choice is that the two can drift, and the place it would surface
+// is the P8 wiring (#27), long after this phase closed.
+//
+// This is a type-level assertion that emits no meaningful runtime value: if a
+// future change to `RunReport` makes it incompatible, the conditional resolves
+// to `never` and the assignment below stops compiling. CI runs `typecheck` over
+// the test tree, so this phase's tests fail instead of the wiring failing later.
+//
+// Deliberately NOT written as `const x: HistoryReport = someDeclaredConst`: a
+// `declare const` is erased at runtime, so that form type-checks but throws
+// `ReferenceError` when the file is actually loaded.
+// ---------------------------------------------------------------------------
+
+type RunReportSatisfiesHistoryReport = RunReport extends HistoryReport ? true : never;
+export const runReportSatisfiesHistoryReport: RunReportSatisfiesHistoryReport = true;
 
 const MIGRATIONS_DIR = join(import.meta.dirname, "..", "..", "migrations");
 
