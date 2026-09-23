@@ -234,6 +234,44 @@ describe("readHistory — reads the real schema", () => {
   });
 });
 
+describe("readHistory — the limit is a bound parameter, never interpolated", () => {
+  it("passes the clamped limit as a parameter, not in the SQL text", async () => {
+    // The limit arrives from a query string. If it were interpolated into the
+    // statement this would be the one injection surface on the read path, so the
+    // property is asserted rather than left to the docstring.
+    const seen: { sql: string; params: readonly unknown[] }[] = [];
+    const db = migrated();
+    await readHistory(
+      { limit: "7" },
+      {
+        query: (sql, params) => {
+          seen.push({ sql, params });
+          return query(db, sql, ...params);
+        },
+      },
+    );
+    expect(seen[0]?.params).toEqual([7]);
+    expect(seen[0]?.sql).not.toContain("7");
+    db.close();
+  });
+
+  it("passes the clamped value, not the raw one", async () => {
+    const seen: (readonly unknown[])[] = [];
+    const db = migrated();
+    await readHistory(
+      { limit: "100000" },
+      {
+        query: (sql, params) => {
+          seen.push(params);
+          return query(db, sql, ...params);
+        },
+      },
+    );
+    expect(seen[0]).toEqual([MAX_LIMIT]);
+    db.close();
+  });
+});
+
 describe("readHistory — failure isolation for the scheduled path (SPEC §9.6)", () => {
   it("rejects on a query failure so the caller decides how to surface it", async () => {
     // Unlike the write path, a read failure has no control outcome to protect:
@@ -247,6 +285,16 @@ describe("readHistory — failure isolation for the scheduled path (SPEC §9.6)"
       },
     };
     await expect(readHistory({ limit: "10" }, failing)).rejects.toThrow();
+  });
+
+  it("rejects when the query rejects, which is how the real async binding fails", async () => {
+    // A synchronous throw models only one failure shape. The D1 binding is
+    // asynchronous, so the rejection path is the one that actually occurs in
+    // production and must not be silently caught.
+    const failing = {
+      query: (): Promise<HistoryRow[]> => Promise.reject(new Error("D1_ERROR: timeout")),
+    };
+    await expect(readHistory({ limit: "10" }, failing)).rejects.toThrow(/D1_ERROR/);
   });
 
   it("does not swallow the failure as an empty result", async () => {
