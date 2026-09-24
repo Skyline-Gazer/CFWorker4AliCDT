@@ -422,6 +422,26 @@ describe("Cron authority is exclusive to RELEASE", () => {
   });
 });
 
+describe("post-deploy Worker Secret presence gate", () => {
+  for (const [label, workflow, config] of [
+    ["PRE-FLIGHT", PREFLIGHT, "wrangler.preflight.jsonc"],
+    ["RELEASE", RELEASE, "wrangler.deploy.jsonc"],
+  ] as const) {
+    it(`${label} checks required secret names after deploy and fails through the helper`, () => {
+      const steps = allSteps(workflow);
+      const deployIndex = steps.findIndex((step) => (step.run ?? "").includes("wrangler deploy"));
+      const secretListIndex = steps.findIndex((step) =>
+        (step.run ?? "").includes(`wrangler secret list --format json --config ${config}`),
+      );
+
+      expect(deployIndex).toBeGreaterThanOrEqual(0);
+      expect(secretListIndex).toBeGreaterThan(deployIndex);
+      expect(steps[secretListIndex]?.run).toContain("set -o pipefail");
+      expect(steps[secretListIndex]?.run).toContain("node scripts/assert-worker-secret-names.mjs");
+    });
+  }
+});
+
 describe("the superseded single-stage deploy workflow is gone", () => {
   it("has no deploy.yml that conflates bootstrap with release", () => {
     const names = ["deploy.yml"];

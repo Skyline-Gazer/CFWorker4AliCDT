@@ -107,10 +107,10 @@ a commit.**
    without the URL is a Worker config error.
 
 6. **Verify by absence, not by printing.** Do not run any command that echoes a
-   secret to confirm it was set. Confirm through the deployment (§ the deployment
-   document), which fails loudly when a required secret is missing. RELEASE
-   requires the two Alibaba credentials and `ADMIN_TOKEN`; webhook secrets are
-   optional.
+   secret to confirm it was set. PRE-FLIGHT checks the three required binding names
+   after deploy, and RELEASE requires the two Alibaba credentials and `ADMIN_TOKEN`
+   both in its config and in its post-deploy name gate; webhook secrets are
+   optional. The live read-only query confirms the Alibaba credentials work.
 
 ## 5. Verification the policy is minimal
 
