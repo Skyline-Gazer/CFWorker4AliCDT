@@ -776,8 +776,8 @@ test, implement, make it pass, refactor.
 | R1 | `ListCdtInternetTraffic` is undocumented; its contract could differ from the SDK-derived shape. | Traffic misread; wrong decision. | Treat every field as optional and validated. Tolerate missing/reordered fields. Never default to zero. Surface a distinct error stage on shape mismatch. |
 | R2 | CDT endpoint is unconfirmed (`cdt.aliyuncs.com` is a hypothesis from SDK behaviour and independent implementations; `endpoints.json` is absent and no authoritative source exists). | Total monitoring failure. | Make the endpoint configuration, not a constant. Verify empirically at first deployment; fail closed and report if the endpoint does not resolve. |
 | R3 | Signature method for this operation cannot be confirmed against documentation. | Total API failure. | Single `callRpc()` boundary; method selected by config; both official fixtures pinned; V2 retained as a documented fallback path. |
-| R4 | The `Traffic` unit is an assumption (bytes). | Threshold trips at the wrong traffic level. | Document as an assumption. Isolate conversion in one named function. Verify against the Alibaba console at first deployment before enforcing. |
-| R5 | Decimal GB (`1000^3`) is a deliberate break from the prior script and both reference implementations (`1024^3`). 180 GB decimal = 167.6 GiB, so enforcement trips **earlier** for the same byte count. | Behavioural surprise for anyone migrating. | Owner-selected. Documented explicitly as a divergence in the SPEC and README; never silently inherited. |
+| R4 | The `Traffic` unit is an assumption (bytes), and the displayed traffic must agree with the Alibaba CDT console. | Threshold trips at the wrong traffic level. | Document that raw `Traffic` is treated as bytes. Convert in one named function using `1024^3` to match the console display. Verify the Worker value against CDT at first deployment before enforcing. |
+| R5 | A conversion regression could reintroduce SI decimal GB (`10^9`) and make Worker traffic disagree with the CDT console. | Operators see an inconsistent traffic reading and enforcement evaluates a different scale. | Pin the `1024^3` divisor, the owner-provided `27,858,630`-byte console example, and exact `180 * 1024^3` threshold conversion in tests. Keep `TRAFFIC_THRESHOLD_GB` at `180`. |
 | R6 | Asynchronous ECS operations mean the observed state after a call is transitional, not terminal. | A naive implementation would poll, exceed runtime limits, or report a false final state. | One immediate follow-up describe only. `Starting`/`Stopping` are reported as valid observed states. No long-polling. |
 | R7 | `StoppedMode` is silently ignored for unsupported instances. | Billing behaves differently than configured, with no error. | Pin `StoppedMode` explicitly and document the silent-ignore behaviour; never rely on account defaults. |
 | R8 | Workers Free applies a 10 ms Cron CPU allowance automatically; custom `limits.cpu_ms` is unsupported on Free. | Runs above the platform allowance are terminated mid-flight. | Measure actual Cron `cpuTime` after RELEASE. Remain on Free initially; consider Paid / Standard Usage Model only if measured usage warrants it and the owner chooses it. Configure a custom CPU limit only with that plan and owner choice. |
@@ -813,7 +813,9 @@ During this revision **no** Issue is created, closed, or edited.
 
 **Resolved by the owner (recorded, not re-opened):**
 
-1. Units — decimal `1000^3`, labelled `GB`; the name `TRAFFIC_THRESHOLD_GB` is kept.
+1. Units — console-aligned GB, calculated as bytes divided by `1024^3`; the public
+   `trafficGB` and `TRAFFIC_THRESHOLD_GB` names are kept, and the threshold default
+   remains `180` with no compensating adjustment.
 2. Notification cadence — webhook reporting is an optional subsystem: when a valid
    `WEBHOOK_URL` is configured, one attempt is made per scheduled run, including
    no-op and pipeline error runs; without it, zero attempts are made. No

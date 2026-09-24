@@ -168,7 +168,7 @@ describe("scheduled — configured webhook reporting (SPEC §7.2, §9.2)", () =>
         // CDT then ECS describe, both plausible successes.
         if (url.includes("cdt.")) {
           return Promise.resolve(
-            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1_000_000_000 }] }), {
+            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1024 ** 3 }] }), {
               status: 200,
               headers: { "content-type": "application/json" },
             }),
@@ -201,7 +201,7 @@ describe("scheduled — webhook is optional", () => {
         seen.push(url);
         if (url.includes("cdt.")) {
           return Promise.resolve(
-            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1_000_000_000 }] }), {
+            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1024 ** 3 }] }), {
               status: 200,
               headers: { "content-type": "application/json" },
             }),
@@ -401,7 +401,7 @@ describe("scheduled — history and control are independent (SPEC §9.6, A11)", 
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
         if (url.includes("cdt.")) {
           return Promise.resolve(
-            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1_000_000_000 }] }), {
+            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1024 ** 3 }] }), {
               status: 200,
               headers: { "content-type": "application/json" },
             }),
@@ -454,7 +454,7 @@ describe("scheduled — history and control are independent (SPEC §9.6, A11)", 
         if (url.includes("/run")) return Promise.resolve(new Response("{}", { status: 200 }));
         if (url.includes("cdt.")) {
           return Promise.resolve(
-            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1_000_000_000 }] }), {
+            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1024 ** 3 }] }), {
               status: 200,
               headers: { "content-type": "application/json" },
             }),

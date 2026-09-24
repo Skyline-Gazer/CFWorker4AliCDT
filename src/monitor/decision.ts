@@ -46,9 +46,9 @@ export type DecisionAction =
   | "fail-safe";
 
 export interface DecideInput {
-  /** Total traffic in decimal GB. */
+  /** Total traffic in console-aligned GB (bytes divided by 1024^3). */
   readonly trafficGB: number;
-  /** Configured threshold in decimal GB. */
+  /** Configured threshold in console-aligned GB (bytes divided by 1024^3). */
   readonly thresholdGB: number;
   readonly observed: EcsStatus;
 }

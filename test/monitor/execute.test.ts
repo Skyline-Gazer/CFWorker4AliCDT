@@ -36,7 +36,7 @@ function harness(overrides: Partial<PipelineDeps> = {}): Harness {
   const counters = { starts: 0, stops: 0, describes: 0, cdtCalls: 0 };
 
   const defaults: PipelineDeps = {
-    getTraffic: () => Promise.resolve({ totalBytes: 1_000_000_000, entries: [] }),
+    getTraffic: () => Promise.resolve({ totalBytes: 1024 ** 3, entries: [] }),
     describeInstance: () => Promise.resolve({ instanceId: "i-abc", status: "running" }),
     startInstance: () => Promise.resolve({ requested: true }),
     stopInstance: () => Promise.resolve({ requested: true }),
@@ -125,7 +125,7 @@ describe("runPipeline — at most one mutation", () => {
 
   it("issues exactly one StopInstance when a stop is required", async () => {
     const h = harness({
-      getTraffic: () => Promise.resolve({ totalBytes: 180_000_000_000, entries: [] }),
+      getTraffic: () => Promise.resolve({ totalBytes: 180 * 1024 ** 3, entries: [] }),
     });
     const report = await runPipeline(h.deps, CONFIG);
     expect(report.action).toBe("stop");

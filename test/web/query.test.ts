@@ -29,7 +29,7 @@ const CONFIG: QueryConfig = { trafficThresholdGB: 180 };
 
 function deps(overrides: Partial<QueryDeps> = {}): QueryDeps {
   return {
-    getTraffic: () => Promise.resolve({ totalBytes: 1_000_000_000, entries: [] }),
+    getTraffic: () => Promise.resolve({ totalBytes: 1024 ** 3, entries: [] }),
     describeInstance: () => Promise.resolve({ instanceId: "i-abc", status: "running" }),
     ...overrides,
   };
@@ -88,7 +88,7 @@ describe("runReadOnlyQuery — the read-only guarantee is structural (SPEC §8.5
 });
 
 describe("runReadOnlyQuery — observation and decision (SPEC §8.5)", () => {
-  it("returns the observed traffic in decimal GB", async () => {
+  it("returns the observed traffic in console-aligned GB", async () => {
     const result = await runReadOnlyQuery(deps(), CONFIG);
     expect(result.trafficGB).toBe(1);
     expect(result.thresholdGB).toBe(180);
@@ -118,13 +118,13 @@ describe("runReadOnlyQuery — observation and decision (SPEC §8.5)", () => {
 
   it("evaluates the threshold boundary exactly as the scheduled path does", async () => {
     const above = await runReadOnlyQuery(
-      deps({ getTraffic: () => Promise.resolve({ totalBytes: 180_000_000_000, entries: [] }) }),
+      deps({ getTraffic: () => Promise.resolve({ totalBytes: 180 * 1024 ** 3, entries: [] }) }),
       CONFIG,
     );
     expect(above.desired).toBe("stopped");
 
     const below = await runReadOnlyQuery(
-      deps({ getTraffic: () => Promise.resolve({ totalBytes: 179_000_000_000, entries: [] }) }),
+      deps({ getTraffic: () => Promise.resolve({ totalBytes: 179 * 1024 ** 3, entries: [] }) }),
       CONFIG,
     );
     expect(below.desired).toBe("running");
