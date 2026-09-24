@@ -61,7 +61,7 @@ Three distinct classes exist, and conflating them causes real deployment defects
 | --- | --- | --- | --- |
 | **Application runtime variables** | Generated Wrangler `vars` | GitHub **Variables** | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB` |
 | **Deployment-only values** | The resolver / workflow invocation | Repository Variables, `production` Environment Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
-| **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / the dashboard | `ALIYUN_ACCESS_KEY_ID`, `ADMIN_TOKEN` |
+| **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / Cloudflare secret UI | `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ADMIN_TOKEN` |
 
 The difference that matters: **application runtime variables configure how the
 Worker behaves and are not credentials**, so they belong in GitHub Variables, not
@@ -122,6 +122,13 @@ vars with those in the deployed config, so Dashboard edits are silently lost. Si
 this project has a deterministic generated-config boundary, the fix is to keep
 resolution there rather than to add hidden Dashboard state via `keep_vars`.
 
+**Credentials must stay Worker Secrets.** Never put `ALIYUN_ACCESS_KEY_ID`,
+`ALIYUN_ACCESS_KEY_SECRET`, or `ADMIN_TOKEN` in Wrangler `vars`, GitHub Variables,
+or Cloudflare Dashboard plaintext vars. PRE-FLIGHT and RELEASE deploy the generated
+config as the authoritative `vars` set, so a Dashboard plaintext var absent from
+that config is removed during deploy. This is how a plaintext `ALIYUN_ACCESS_KEY_ID`
+binding can be wiped; use Worker Secrets instead.
+
 **Resolution happens in the resolver, not in the Worker.** The resolver's
 responsibility is *deployment completeness*: it fails before generating if a
 required variable is absent, and injects values deterministically. It deliberately
@@ -133,11 +140,11 @@ so there is exactly one implementation of each rule.
 
 | Secret | Requirement | Confirmed? |
 | --- | --- | --- |
-| `ALIYUN_ACCESS_KEY_ID` | **Required by RELEASE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
-| `ALIYUN_ACCESS_KEY_SECRET` | **Required by RELEASE.** Its paired secret. | ☐ |
+| `ALIYUN_ACCESS_KEY_ID` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
+| `ALIYUN_ACCESS_KEY_SECRET` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE.** Its paired secret. | ☐ |
 | `WEBHOOK_URL` | Optional. When set, must be absolute `https://` and enables one webhook attempt per scheduled run. | ☐ |
 | `WEBHOOK_TOKEN` | Optional with `WEBHOOK_URL`. When set, sent as `Authorization: Bearer <token>`; token alone is a config error. | ☐ |
-| `ADMIN_TOKEN` | **Required by RELEASE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
+| `ADMIN_TOKEN` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
 
 ### External confirmations
 
@@ -151,13 +158,13 @@ so there is exactly one implementation of each rule.
 | The HTTP exposure decision has been made (see §3c), or a record exists of choosing none. | ☐ |
 | `REGION_ID` and `ECS_INSTANCE_ID` are set as repository **variables** (not secrets). | ☐ |
 
-**Set the required Worker Secrets during preflight.** The PRE-FLIGHT deploy cannot
-declare `secrets.required` (the Worker does not exist yet — see §3b), so missing
-required secrets are not caught until RELEASE, where deployment fails loudly. Set
-`ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN`. Configure
-`WEBHOOK_URL` and, optionally, `WEBHOOK_TOKEN` only when notification is wanted;
-`WEBHOOK_TOKEN` without `WEBHOOK_URL` is a runtime config error. Their version
-semantics are explained in §3b step 2.
+Set `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN` as Worker
+Secrets. PRE-FLIGHT keeps `secrets.required: []` so the first deploy can create a
+Worker, then hard-fails if `wrangler secret list` does not contain all three names.
+RELEASE also declares them in `secrets.required`. Configure `WEBHOOK_URL` and,
+optionally, `WEBHOOK_TOKEN` only when notification is wanted; neither is required
+by the name gate, and `WEBHOOK_TOKEN` without `WEBHOOK_URL` is a runtime config
+error.
 
 ## 2. Setting Worker Secrets
 
@@ -173,12 +180,17 @@ npx wrangler secret put ADMIN_TOKEN
 Optional webhook reporting uses `WEBHOOK_URL`; when authentication is required,
 also set `WEBHOOK_TOKEN`. Never set the token without the URL.
 
-Cloudflare's secret UI is an equivalent alternative; the choice does not affect the
-outcome.
+Cloudflare's Worker Secret UI is an equivalent alternative; do not use its
+plaintext variable UI for these bindings.
 
 **Verify by absence, not by printing.** Do not run a command that echoes a secret
-to confirm it was set. Confirmation comes from the deployment, which fails loudly
-when a required secret is missing, and from a successful first run.
+to confirm it was set. PRE-FLIGHT checks names only after deploy; the live read-only
+query confirms that the Alibaba credentials work.
+
+If `ALIYUN_ACCESS_KEY_ID` was ever present in GitHub Actions logs, the owner must
+rotate the Alibaba AccessKey. Review the affected run by its Actions URL, for
+example `https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36014384495`;
+never copy the key value into an issue, log, chat, or repository file.
 
 > **`wrangler secret put` has version semantics.** It creates a new Worker version
 > and deploys it immediately. That interacts with preflight verification — see
@@ -252,10 +264,14 @@ set in advance with `wrangler secret put`."* So a first deploy that declared
 guarantee applies. The optional webhook pair is not in `secrets.required`.
 
 This is a real constraint on the bootstrap order, not a relaxed safety property:
-from the first *release* onward, a missing secret still fails the deployment loudly.
-Note also that `wrangler deploy --dry-run` does **not** surface it, because the
-validation runs on the real upload path — which is why it is asserted structurally
-in `test/deploy/config-resolution.test.ts`.
+after deploying, PRE-FLIGHT runs `wrangler secret list --format json` through
+`scripts/assert-worker-secret-names.mjs` and fails the job unless
+`ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN` are present.
+Webhook names remain optional. RELEASE also checks the names after deploy and
+declares the required names in `secrets.required`. Note also that
+`wrangler deploy --dry-run` does **not** surface `secrets.required` validation,
+because that validation runs on the real upload path — which is why it is asserted
+structurally in `test/deploy/config-resolution.test.ts`.
 
 The deploy reports a **Version URL**. That URL exists even with `workers_dev =
 false`, provided `preview_urls` is enabled.
@@ -263,12 +279,19 @@ false`, provided `preview_urls` is enabled.
 **Step 2 — configure Worker Secrets, then verify.** Performed while Cron is still
 absent, so nothing can act on a wrong figure.
 
+On the first-ever deploy, the Worker is created before the name gate runs. If the
+three secrets are not present yet, PRE-FLIGHT deploys with Cron disabled and then
+fails at the gate. Set the missing names with `wrangler secret put` once the Worker
+exists. Each `secret put` creates and deploys a new Worker version, so a rerun of
+PRE-FLIGHT is usually unnecessary when only secrets changed; confirm the names and
+perform the live read-only check against the newest Version URL after secret repair.
+
 > **Secret updates create versions.** `wrangler secret put` creates a new Worker
 > version and deploys it immediately. So the Version URL printed by the initial
 > bootstrap deploy is **not** necessarily the version you end up verifying after
 > secrets are attached. After the final secret update, locate and use the **latest
-> applicable Version URL** — from the `wrangler secret put` output, or the Worker's
-> Deployments list in the Cloudflare dashboard.
+> applicable Version URL after any secret update** — from the `wrangler secret put`
+> output, or the Worker's Deployments list in the Cloudflare dashboard.
 >
 > This does not reintroduce risk: Cron is still absent on every one of these
 > versions, because they all descend from the preflight config that declares

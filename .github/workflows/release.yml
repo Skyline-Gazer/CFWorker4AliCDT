@@ -31,8 +31,8 @@ name: Release deploy (Cron authority)
 # because workflow code comes from the selected ref.
 #
 # RELEASE also restores `secrets.required`, which PRE-FLIGHT had to clear because a
-# Worker that does not exist yet cannot hold secrets. From here on, a deployment
-# missing a required secret fails loudly.
+# Worker that does not exist yet cannot hold secrets. PRE-FLIGHT and RELEASE both
+# check the required names after deployment; a missing secret also fails RELEASE.
 #
 # Every confirmation is `required` and has no default value, because a boolean with
 # a default is a gate that passes when nobody looks at it.
@@ -149,13 +149,15 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --config wrangler.deploy.jsonc
 
-      # Evidence only. Deliberately does not print secret values, and
-      # `wrangler secret list` reports names, not values.
-      - name: Record deployed secret names
+      # Check names after deploy as well as relying on `secrets.required`, in case
+      # a secret is cleared after config generation. Wrangler reports names only.
+      - name: Verify required Worker Secret names
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler secret list --config wrangler.deploy.jsonc
+        run: |
+          set -o pipefail
+          npx wrangler secret list --format json --config wrangler.deploy.jsonc | node scripts/assert-worker-secret-names.mjs
 
       - name: Next step — measure Cron cpuTime
         run: |

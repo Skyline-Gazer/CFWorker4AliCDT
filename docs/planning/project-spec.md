@@ -32,6 +32,10 @@ The RELEASE `secrets.required` list contains exactly `ALIYUN_ACCESS_KEY_ID`,
 `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN`. The optional notification pair is
 not required by RELEASE. Runtime config rejects `WEBHOOK_TOKEN` without
 `WEBHOOK_URL`; omitting both leaves scheduled control and D1 history enabled.
+PRE-FLIGHT checks those three required names after deploy while keeping
+`secrets.required` empty for first-create compatibility. Never place them in
+Wrangler `vars`, GitHub Variables, or Cloudflare Dashboard plaintext vars; the
+generated deployment config is authoritative for `vars`.
 
 ### 2.2 Plain bindings (Wrangler `vars`)
 

@@ -18,7 +18,8 @@ name: Preflight deploy (read-only verification)
 #
 #    The same mode also clears `secrets.required`, because Wrangler refuses to
 #    deploy a Worker that does not exist yet while it lists secrets that cannot be
-#    set in advance. RELEASE restores the list.
+#    set in advance. After deploy, a separate hard-fail gate checks that all three
+#    required Worker Secret names are present. RELEASE also restores the list.
 #
 # 2. **No stable production HTTP endpoint.** `workers_dev = false` and no route, so
 #    there is no inbound control surface to forget about. A Version URL is exposed
@@ -137,10 +138,11 @@ jobs:
       # formatting detail: it is the difference between this Worker having no Cron
       # Trigger and this Worker inheriting whatever is already deployed.
       #
-      # It also writes `secrets.required: []`. That is a Wrangler constraint, not a
-      # relaxed safety check: a Worker that does not exist yet cannot hold secrets,
-      # so a first deploy declaring them is refused outright. RELEASE restores the
-      # full list. Set the secrets during this stage anyway; see deployment.md §1.
+      # It also writes `secrets.required: []`. That is a Wrangler first-create
+      # constraint: a Worker that does not exist yet cannot hold secrets, so a
+      # first deploy declaring them is refused outright. Once deployed, the
+      # required Worker Secret names are checked below and missing names fail this
+      # job. RELEASE restores the full `secrets.required` list.
       #
       # The application runtime variables are injected here too, from the same
       # resolver boundary RELEASE uses, so a change of mode cannot silently change
@@ -176,13 +178,16 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --config wrangler.preflight.jsonc
 
-      # Evidence only. Deliberately does not print secret values, and
-      # `wrangler secret list` reports names, not values.
-      - name: Record deployed secret names
+      # The first deploy creates the Worker, so secret names can now be checked
+      # even though PRE-FLIGHT must keep `secrets.required: []`. Wrangler reports
+      # names only; the helper hard-fails if any required name is absent.
+      - name: Verify required Worker Secret names
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler secret list --config wrangler.preflight.jsonc
+        run: |
+          set -o pipefail
+          npx wrangler secret list --format json --config wrangler.preflight.jsonc | node scripts/assert-worker-secret-names.mjs
 
       # The owner's next action is manual and cannot be automated here: verify the
       # Version URL, then authorize RELEASE. Stated rather than implied, because
@@ -199,9 +204,8 @@ jobs:
           echo "     and dispatched no webhook."
           echo "  5. The returned traffic matches the Alibaba console for the same period."
           echo ""
-          echo "Set all five secrets before RELEASE. Preflight cannot require them"
-          echo "(a new Worker cannot hold secrets), so RELEASE is where an unset secret"
-          echo "fails the deployment."
+          echo "PRE-FLIGHT checks the three required Worker Secret names after deploy."
+          echo "RELEASE also requires those secrets at deploy time; webhook secrets remain optional."
           echo ""
           echo "Only then may RELEASE be dispatched. Scheduled mutation authority is"
           echo "enabled by RELEASE and by nothing else; this workflow never promotes itself."

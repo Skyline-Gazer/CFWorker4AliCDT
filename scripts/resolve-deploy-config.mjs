@@ -186,6 +186,8 @@ function injectDatabaseId(binding) {
  * CI logs, and no supplied value is ever echoed.
  */
 function injectApplicationVars(config) {
+  // Credentials and optional webhook bindings must never enter `vars`; ALIYUN_*,
+  // ADMIN_TOKEN, and WEBHOOK_* belong in Worker Secrets only.
   const vars = typeof config.vars === "object" && config.vars !== null ? config.vars : {};
 
   // Required first, and before any optional work: a config missing a required

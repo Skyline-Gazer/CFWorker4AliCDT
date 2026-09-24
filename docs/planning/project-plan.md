@@ -537,6 +537,10 @@ control outcome is finalized in memory first, then persisted and notified.
   configuration (`REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB`, `ADMIN_USER`,
   `STOPPED_MODE`) lives in `vars`. `secrets.required` is declared in the Wrangler
   config for the required RELEASE secrets so a misconfigured deploy **fails loudly**.
+  PRE-FLIGHT checks those required names after deploy while keeping
+  `secrets.required` empty for first-create compatibility. Never put the Alibaba
+  credentials or `ADMIN_TOKEN` in Wrangler `vars`, GitHub Variables, or Dashboard
+  plaintext vars; generated deployment config is authoritative for `vars`.
 - **Secret hygiene.** No credential, token, or secret-bearing URL is ever logged,
   returned over HTTP, rendered into HTML, written to D1, written to a test fixture, or
   committed. Error text is sanitised before leaving the Worker. Workers Logs persist by
