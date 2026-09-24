@@ -3,7 +3,7 @@
  *
  * Two properties drive the shape of this module.
  *
- * **Fail closed, before any network call.** Every rule here exists because its
+ * **Fail closed, before any Alibaba call.** Every rule here exists because its
  * violation would otherwise reach a comparison or a request. A
  * `TRAFFIC_THRESHOLD_GB` that silently became `NaN` produces a comparison that
  * is always false; a coerced `0` produces one that is always true. Neither is
@@ -49,7 +49,7 @@ export interface RawEnv {
 export interface Config {
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
-  readonly webhookUrl: string;
+  readonly webhookUrl: string | undefined;
   readonly webhookToken: string | undefined;
   readonly regionId: string;
   readonly ecsInstanceId: string;
@@ -133,7 +133,6 @@ export function loadConfig(env: RawEnv): ConfigResult {
   const required: readonly (readonly [string, string | undefined])[] = [
     ["ALIYUN_ACCESS_KEY_ID", env.ALIYUN_ACCESS_KEY_ID],
     ["ALIYUN_ACCESS_KEY_SECRET", env.ALIYUN_ACCESS_KEY_SECRET],
-    ["WEBHOOK_URL", env.WEBHOOK_URL],
     ["REGION_ID", env.REGION_ID],
     ["ECS_INSTANCE_ID", env.ECS_INSTANCE_ID],
   ];
@@ -146,20 +145,24 @@ export function loadConfig(env: RawEnv): ConfigResult {
   // Narrowed by the loop above; TypeScript cannot see that, so re-check.
   const accessKeyId = env.ALIYUN_ACCESS_KEY_ID;
   const accessKeySecret = env.ALIYUN_ACCESS_KEY_SECRET;
-  const webhookUrl = env.WEBHOOK_URL;
   const regionId = env.REGION_ID;
   const ecsInstanceId = env.ECS_INSTANCE_ID;
   if (
     !present(accessKeyId) ||
     !present(accessKeySecret) ||
-    !present(webhookUrl) ||
     !present(regionId) ||
     !present(ecsInstanceId)
   ) {
     return error("A required binding was absent or empty");
   }
 
-  if (!isAbsoluteHttpsUrl(webhookUrl)) {
+  const webhookUrl = present(env.WEBHOOK_URL) ? env.WEBHOOK_URL : undefined;
+  const webhookToken = present(env.WEBHOOK_TOKEN) ? env.WEBHOOK_TOKEN : undefined;
+  if (webhookToken !== undefined && webhookUrl === undefined) {
+    return error("WEBHOOK_TOKEN requires WEBHOOK_URL; configure both bindings or neither");
+  }
+
+  if (webhookUrl !== undefined && !isAbsoluteHttpsUrl(webhookUrl)) {
     // The URL may carry a token, so it is deliberately not echoed.
     return error("WEBHOOK_URL must be an absolute https:// URL");
   }
@@ -203,7 +206,7 @@ export function loadConfig(env: RawEnv): ConfigResult {
       accessKeyId,
       accessKeySecret,
       webhookUrl,
-      webhookToken: present(env.WEBHOOK_TOKEN) ? env.WEBHOOK_TOKEN : undefined,
+      webhookToken,
       regionId,
       ecsInstanceId,
       trafficThresholdGB,

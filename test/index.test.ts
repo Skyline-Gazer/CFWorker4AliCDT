@@ -12,8 +12,8 @@ import type { Env } from "../src/index";
  *
  * **The run must not be able to throw.** A rejection escapes into the Cron
  * runtime, which records a failed invocation and — more importantly — means the
- * webhook and the history row were never attempted. A scheduled run that cannot
- * report is worse than one that reports a failure.
+ * history row was never attempted. When configured, a webhook notification may
+ * also be skipped.
  *
  * **A D1 failure must not change the control outcome.** The history write happens
  * after the decision has already been applied, so an unavailable database must
@@ -46,8 +46,8 @@ function ctx(): ExecutionContext {
 
 describe("scheduled — configuration failure aborts before any Alibaba call", () => {
   it("makes no Alibaba API call when the configuration is invalid", async () => {
-    // The webhook is still attempted — reporting is required on every execution —
-    // so the assertion is on the *Alibaba* endpoints, not on fetch generally.
+    // This fixture has a configured webhook, so the assertion is on the
+    // *Alibaba* endpoints, not on fetch generally.
     const alibaba: string[] = [];
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -75,6 +75,17 @@ describe("scheduled — configuration failure aborts before any Alibaba call", (
       });
     await worker.scheduled({} as ScheduledController, env({ ECS_INSTANCE_ID: "" }), ctx());
     expect(seen.some((u) => u.includes("/run"))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it("does not notify about a configuration failure when the URL is absent", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    await worker.scheduled(
+      {} as ScheduledController,
+      env({ WEBHOOK_URL: undefined, WEBHOOK_TOKEN: undefined, ECS_INSTANCE_ID: "" }),
+      ctx(),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
@@ -127,7 +138,7 @@ describe("scheduled — a run must not be able to throw", () => {
   });
 });
 
-describe("scheduled — attempts reporting on every run (SPEC §7.2, §9.2)", () => {
+describe("scheduled — configured webhook reporting (SPEC §7.2, §9.2)", () => {
   it("attempts a webhook even when the run fails", async () => {
     const seen: string[] = [];
     const fetchSpy = vi
@@ -145,7 +156,7 @@ describe("scheduled — attempts reporting on every run (SPEC §7.2, §9.2)", ()
   });
 
   it("attempts a webhook on a no-op run", async () => {
-    // A no-op still reports: the owner requires notification on every execution.
+    // A no-op still reports when the optional notifier is configured.
     const seen: string[] = [];
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -174,6 +185,65 @@ describe("scheduled — attempts reporting on every run (SPEC §7.2, §9.2)", ()
       });
     await worker.scheduled({} as ScheduledController, env(), ctx());
     expect(seen.some((u) => u.includes("/run"))).toBe(true);
+    fetchSpy.mockRestore();
+  });
+});
+
+describe("scheduled — webhook is optional", () => {
+  it("runs and records history without attempting a webhook", async () => {
+    const seen: string[] = [];
+    let historyRow: Record<string, unknown> | undefined;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        seen.push(url);
+        if (url.includes("cdt.")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 1_000_000_000 }] }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              Instances: { Instance: [{ InstanceId: "i-abc123", Status: "Running" }] },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      });
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...values: unknown[]) => ({
+          run: () => {
+            const columns = /\(([^)]+)\) VALUES/.exec(sql)?.[1]?.split(", ") ?? [];
+            historyRow = Object.fromEntries(
+              columns.map((column, index) => [column, values[index]]),
+            );
+            return Promise.resolve({});
+          },
+        }),
+      }),
+    };
+
+    await worker.scheduled(
+      {} as ScheduledController,
+      env({
+        WEBHOOK_URL: undefined,
+        WEBHOOK_TOKEN: undefined,
+        TRAFFIC_DB: db as unknown as D1Database,
+      }),
+      ctx(),
+    );
+
+    expect(seen.some((url) => url.includes("/run"))).toBe(false);
+    expect(seen.some((url) => url.includes("cdt."))).toBe(true);
+    expect(historyRow?.webhook_attempted).toBe(0);
+    expect(historyRow?.webhook_ok).toBeNull();
     fetchSpy.mockRestore();
   });
 });

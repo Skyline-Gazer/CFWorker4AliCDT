@@ -99,7 +99,7 @@ describe("runPipeline — no-op runs", () => {
     expect(h.stops).toBe(0);
   });
 
-  it("still reports on a no-op run (owner decision: every run reports)", async () => {
+  it("still reports on a no-op run when a notifier is configured", async () => {
     let notified = 0;
     const h = harness({
       notify: () => {
@@ -249,6 +249,15 @@ describe("runPipeline — mutation failure", () => {
 });
 
 describe("runPipeline — webhook isolation (SPEC §7.1)", () => {
+  it("does not attempt a webhook when no notifier is configured", async () => {
+    const h = harness();
+    const report = await runPipeline({ ...h.deps, notify: undefined }, CONFIG);
+    expect(report.status).toBe("success");
+    expect(report.webhookAttempted).toBe(false);
+    expect(report.webhookOk).toBeUndefined();
+    expect(h.starts + h.stops).toBe(0);
+  });
+
   it("a webhook failure does not change the control outcome", async () => {
     const h = harness({
       notify: () => Promise.resolve({ ok: false }),

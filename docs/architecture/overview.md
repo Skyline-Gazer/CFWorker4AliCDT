@@ -19,7 +19,7 @@ src/aliyun/api.ts         listCdtInternetTraffic(), describeInstance(),
 src/monitor/decision.ts   decide()  — pure, no I/O
 src/monitor/execute.ts    runPipeline(), fail-safe gate, report assembly
 
-src/notify/webhook.ts     run reporting, failure-isolated
+src/notify/webhook.ts     optional run reporting, failure-isolated
 
 src/storage/history.ts    D1 write path
 src/storage/read.ts       bounded D1 read
@@ -44,32 +44,43 @@ without scrolling past routing code.
 scheduled()
      │
      ▼
- loadConfig(env) ──── invalid ──▶ error webhook (stage: config) ──▶ exit, no mutation
+ loadConfig(env) ──── invalid ──▶ config error; notify only with usable HTTPS URL
+     └────────────────────────▶ exit, no mutation, no history row
      │
      ▼
- getTraffic() ─── CDT failure / missing / invalid ──▶ error webhook (cdt-query) ──▶ exit, NO mutation
+ getTraffic() ─── CDT failure / missing / invalid ──▶ error report, NO mutation
      │  trafficBytes: valid, non-negative, finite
      ▼
- describeInstance() ─── ECS failure / instance absent ──▶ error webhook (ecs-describe) ──▶ exit, no mutation
+ describeInstance() ─── ECS failure / instance absent ──▶ error report, no mutation
      │
      ▼
- decide(trafficGB, thresholdGB, observed) ──▶ { desired, action, mutation, reason }
+decide(trafficGB, thresholdGB, observed) ──▶ { desired, action, mutation, reason }
      │
      ▼
- action === "fail-safe" ───▶ error webhook ──▶ exit, NO mutation
+ action === "fail-safe" ───▶ error report, NO mutation
      │
      ▼
- at most ONE mutation (start | stop) ─── failure ──▶ error webhook (ecs-start|ecs-stop) ──▶ exit
+ at most ONE mutation (start | stop) ─── failure ──▶ error report
      │
      ▼
- one immediate follow-up describe  (transitional results are valid; never polled)
+one immediate follow-up describe  (transitional results are valid; never polled)
      │
      ▼
- recordRun()  ──▶ D1   ← AFTER control is applied; a failure degrades the record only
+ build report ──▶ optional notify() when WEBHOOK_URL is configured
      │
      ▼
- notify()             ← reporting side channel; cannot throw into control
+ recordRun() ──▶ D1   ← AFTER control; failure degrades history only
 ```
+
+Failure labels in the diagram mean the pipeline returns early from Alibaba work
+with a classified report; validly configured outcomes then converge on report
+handling and D1 persistence. Config errors exit before a history row is written.
+
+Without `WEBHOOK_URL`, the notifier is omitted: no request is made, the report
+sets `webhookAttempted` to `false` and leaves `webhookOk` undefined, and D1 stores
+`webhook_ok` as NULL. With a URL, one notification attempt follows every validly
+configured scheduled run. Alibaba remains authoritative; D1 and enabled webhook
+reporting are observational.
 
 Three properties of this ordering are load-bearing:
 

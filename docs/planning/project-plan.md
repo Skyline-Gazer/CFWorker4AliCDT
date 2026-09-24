@@ -15,6 +15,10 @@
 > architecture and resolved **Q4** (remain on Workers Free; measure before upgrading),
 > **Q5** (retain D1 history indefinitely), and **Q6** (repository is public; enable the
 > `main` protection ruleset — R11 resolved, Issue #15 unblocked).
+>
+> Owner amendment (2026-09-24): generic webhook reporting is optional; when configured
+> it is attempted once per scheduled run, and without it D1 history and ECS control
+> continue normally.
 
 ## 1. Document control
 
@@ -47,7 +51,7 @@ so a reviewer can see the revision is additive rather than a rewrite.
 - A Cloudflare Worker that is **no longer stateless**: it keeps **monitoring history**
   in D1. It is still **control-stateless** — no decision depends on D1 contents.
 - An **authenticated operational dashboard** served from the same Worker.
-- **D1 monitoring history** as an observational record of every scheduled run.
+- **D1 monitoring history** as an observational record of every config-valid scheduled run.
 - An **authenticated, strictly read-only manual live query** endpoint, powering
   "Query now" / "Refresh" on the dashboard.
 - **Cron remains the only ECS mutation authority.** The revision widens the read and
@@ -56,11 +60,10 @@ so a reviewer can see the revision is additive rather than a rewrite.
 ### 2.3 Reason
 
 An unattended threshold enforcer with no operator-visible history is hard to trust and
-hard to debug. When the system declines to act — a `fail-safe` row, an invalid traffic
-reading, a `config` error — the operator currently has only a webhook message and
-retained logs. A dashboard with history makes the fail-safe behaviour *inspectable*,
-which is what allows a conservative design to be operated with confidence rather than
-blind faith.
+hard to debug. When the system declines to act — a `fail-safe` row or an invalid traffic
+reading — D1 history makes that behaviour inspectable, while configured webhook
+reporting adds a notification. Config errors remain outside D1 history and may be sent
+to the webhook only when a usable HTTPS URL is configured.
 
 The dashboard is deliberately **read-only with respect to ECS control**. It answers
 "what does the system see and what did it decide", never "make it do this now". A manual
@@ -105,15 +108,15 @@ A single Cloudflare Worker, invoked by a Cron Trigger every 10 minutes, that:
 3. Applies a deterministic threshold rule to decide the *desired* instance state.
 4. Performs **at most one** idempotent ECS state mutation, and only when the desired
    state differs from the observed state.
-5. Reports the outcome of every run to a generic webhook.
-6. Records the outcome of every run in D1 as monitoring history.
+5. When the optional generic webhook is configured, attempts one report per scheduled run.
+6. Records the outcome of every config-valid scheduled run in D1 as monitoring history.
 7. Serves an authenticated dashboard over the history and current state.
 
 ### Success criteria
 
 | # | Criterion |
 | --- | --- |
-| S1 | A scheduled run that cannot reliably retrieve traffic performs **zero** ECS mutations, logs, dispatches an error webhook, and exits. |
+| S1 | A scheduled run that cannot reliably retrieve traffic performs **zero** ECS mutations, returns an error report, records it in D1, and attempts a webhook only when configured. |
 | S2 | A missing, null, non-numeric, negative, or unparseable traffic value is **never** interpreted as `0`. |
 | S3 | Desired state equals observed state ⇒ no API mutation is issued. |
 | S4 | Webhook delivery failure never changes, cancels, reverses, or triggers an ECS operation. |
@@ -316,13 +319,13 @@ second control authority.
 scheduled(controller, env, ctx)
         │
         ▼
-  loadConfig(env) ──── invalid ──▶ error webhook (stage: config) ──▶ exit, no mutation
+  loadConfig(env) ──── invalid ──▶ optional config webhook with usable HTTPS URL ──▶ exit, no mutation or history row
         │
         ▼
-  getTraffic()  ─── CDT failure / missing / invalid ──▶ error webhook ──▶ exit, NO mutation
+  getTraffic()  ─── CDT failure / missing / invalid ──▶ error report, NO mutation ──┐
         │  trafficBytes: valid, non-negative, finite
         ▼
-  getInstanceStatus() ─── ECS failure ──▶ error webhook ──▶ exit, no mutation
+  getInstanceStatus() ─── ECS failure ──▶ error report, no mutation ───────────────┤
         │
         ▼
   decide(traffic, threshold, status) ──▶ { desired, action, reason }
@@ -331,10 +334,17 @@ scheduled(controller, env, ctx)
   apply(desired, status) ─── at most ONE mutation, idempotent ──▶ observe-after
         │
         ▼
-  build execution report
-        ├──▶ notify(success payload)      ← failure isolated, logged only
-        └──▶ recordHistory(report)        ← failure isolated, logged only
+  all config-valid outcomes ──▶ build execution report
+                                      │
+                                      ▼
+                         optional notify() when configured
+                                      │
+                                      ▼
+                         recordHistory(report) in D1
 ```
+
+Pipeline errors stop further Alibaba work but still return reports for optional
+notification and D1 history. A config error exits before control and history.
 
 Alibaba state is authoritative. D1 is an observational record. The webhook is a
 notification. **Neither D1 nor the webhook is a prerequisite for ECS control** — both
@@ -519,12 +529,14 @@ control outcome is finalized in memory first, then persisted and notified.
   `cdt:ListCdtInternetTraffic`, `ecs:DescribeInstances`, `ecs:StartInstance`,
   `ecs:StopInstance`. All four names were verified against current documentation.
   No wildcard resources beyond the single instance and the CDT product.
-- **Secrets.** `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `WEBHOOK_URL`,
-  optional `WEBHOOK_TOKEN`, and `ADMIN_TOKEN` are Workers Secrets. Non-secret
+- **Secrets.** `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, optional
+  `WEBHOOK_URL`, optional `WEBHOOK_TOKEN`, and `ADMIN_TOKEN` are Workers Secrets.
+  The RELEASE required list is exactly the two Alibaba credentials and
+  `ADMIN_TOKEN`; the notification pair is optional, but `WEBHOOK_TOKEN` without
+  `WEBHOOK_URL` is a runtime config error. Non-secret
   configuration (`REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB`, `ADMIN_USER`,
   `STOPPED_MODE`) lives in `vars`. `secrets.required` is declared in the Wrangler
-  config so a misconfigured deploy **fails loudly** instead of deploying a Worker that
-  cannot authenticate.
+  config for the required RELEASE secrets so a misconfigured deploy **fails loudly**.
 - **Secret hygiene.** No credential, token, or secret-bearing URL is ever logged,
   returned over HTTP, rendered into HTML, written to D1, written to a test fixture, or
   committed. Error text is sanitised before leaving the Worker. Workers Logs persist by
@@ -670,8 +682,9 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
   before deploy — never implicitly, in both stages.
 - Local development uses `.dev.vars` (gitignored) with obvious fake values.
 - Deployment is manual and gated on owner confirmation of: Worker config, RAM policy,
-  region, instance ID, threshold, cron expression, presence of all secrets, D1 binding,
-  the HTTP exposure decision, and the webhook target. Credential values are never printed.
+  region, instance ID, threshold, cron expression, required RELEASE secrets, D1
+  binding, and the HTTP exposure decision. Webhook configuration is optional.
+  Credential values are never printed.
 - CI validates by installing, formatting, linting, type-checking, and running tests. CI
   performs **no** deployment and makes **no** live API call.
 
@@ -801,8 +814,10 @@ During this revision **no** Issue is created, closed, or edited.
 **Resolved by the owner (recorded, not re-opened):**
 
 1. Units — decimal `1000^3`, labelled `GB`; the name `TRAFFIC_THRESHOLD_GB` is kept.
-2. Notification cadence — a webhook is attempted on **every** scheduled execution,
-   including no-op and error runs. No `NOTIFY_ON_NOOP` in v1.
+2. Notification cadence — webhook reporting is an optional subsystem: when a valid
+   `WEBHOOK_URL` is configured, one attempt is made per scheduled run, including
+   no-op and pipeline error runs; without it, zero attempts are made. No
+   `NOTIFY_ON_NOOP` setting is needed.
 3. `STOPPED_MODE` — default `KeepCharging`, `ForceStop=false`.
 4. Generic webhook only; no platform adapters in v1.
 5. **Cron remains the only ECS mutation authority in v1.**

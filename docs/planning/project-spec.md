@@ -1,12 +1,14 @@
 # CFWorker4AliCDT — Project Specification
 
-> Status: **REVISION 2 — companion to [project-plan.md](./project-plan.md).**
+> Status: **REVISION 3 — companion to [project-plan.md](./project-plan.md).**
 > Supersedes Revision 1. Normative language: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 > Where this SPEC and the PLAN disagree, the SPEC governs behaviour.
 >
 > Amendment carried forward: `STOPPED_MODE` defaults to `KeepCharging` (owner decision, §6.4).
-> Revision 2 adds §7–§10 (webhook cadence, HTTP surface, auth, D1 history) and revises
-> §2, §12, §13. The failure semantics in §3–§6 and §11 are unchanged from Revision 1.
+> Revision 2 added §7–§10 (webhook cadence, HTTP surface, auth, D1 history).
+> Revision 3 makes generic webhook reporting optional while preserving the
+> fail-safe control path, required Alibaba configuration, and D1 history. The
+> failure semantics in §3–§6 and §11 are unchanged from Revision 1.
 
 ## 1. Scope
 
@@ -22,12 +24,14 @@ internal structure beyond what is needed to make behaviour testable.
 | --- | --- | --- |
 | `ALIYUN_ACCESS_KEY_ID` | Yes | Alibaba Cloud AccessKey ID. |
 | `ALIYUN_ACCESS_KEY_SECRET` | Yes | Alibaba Cloud AccessKey secret. Raw value is the V3 signing key. |
-| `WEBHOOK_URL` | Yes | Absolute `https://` URL receiving run reports. |
-| `WEBHOOK_TOKEN` | No | If present, sent as `Authorization: Bearer <token>`. |
-| `ADMIN_TOKEN` | Yes | Dashboard and API credential. See §8. |
+| `WEBHOOK_URL` | No | Optional notification endpoint. If set, must be absolute `https://`; enables one attempt per scheduled run. |
+| `WEBHOOK_TOKEN` | No | Optional bearer token. Valid only when `WEBHOOK_URL` is configured. |
+| `ADMIN_TOKEN` | Required by RELEASE | Dashboard and API credential. See §8. |
 
-Declared in the Wrangler configuration under `secrets.required`, so a deploy with a
-missing secret **fails** rather than shipping a Worker that cannot authenticate.
+The RELEASE `secrets.required` list contains exactly `ALIYUN_ACCESS_KEY_ID`,
+`ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN`. The optional notification pair is
+not required by RELEASE. Runtime config rejects `WEBHOOK_TOKEN` without
+`WEBHOOK_URL`; omitting both leaves scheduled control and D1 history enabled.
 
 ### 2.2 Plain bindings (Wrangler `vars`)
 
@@ -50,10 +54,11 @@ missing secret **fails** rather than shipping a Worker that cannot authenticate.
 
 ### 2.4 Validation
 
-Configuration is validated **before any network call**. A failure here:
+Configuration is validated before any Alibaba call. A failure here:
 
 - performs **no** ECS mutation,
-- dispatches an error webhook with `stage: "config"`,
+- dispatches an error webhook with `stage: "config"` only when a usable HTTPS
+  `WEBHOOK_URL` is present,
 - records no history row,
 - causes the run to exit.
 
@@ -64,7 +69,8 @@ Validation rules:
 | Any required binding absent or empty | config error |
 | `TRAFFIC_THRESHOLD_GB` not a finite number | config error |
 | `TRAFFIC_THRESHOLD_GB` ≤ 0 | config error |
-| `WEBHOOK_URL` not an absolute `https://` URL | config error |
+| `WEBHOOK_URL` present but not an absolute `https://` URL | config error |
+| `WEBHOOK_TOKEN` present while `WEBHOOK_URL` is absent or empty | config error naming both bindings |
 | `REGION_ID` or `ECS_INSTANCE_ID` absent | config error |
 | `SIGNATURE_VERSION` not in {`v2`, `v3`} | config error |
 | `STOPPED_MODE` not in {`StopCharging`, `KeepCharging`} | config error |
@@ -389,16 +395,20 @@ are observational and are never inputs to a control decision.
 
 ### 7.1 Independence
 
-The webhook is logically independent of ECS control. A webhook failure MUST NOT
+Webhook reporting is an optional subsystem, logically independent of ECS control.
+A webhook failure MUST NOT
 cancel, reverse, or trigger an ECS operation, change the decision, or cause an unsafe
 fallback. Notification is a reporting side channel, never a control input. Webhook
 dispatch MUST NOT be able to throw into the control path.
 
 ### 7.2 Cadence
 
-A webhook is **attempted on every scheduled execution** — including `none-running`,
-`none-stopped`, `start`, `stop`, and error runs. There is no `NOTIFY_ON_NOOP` in v1;
-suppressing no-op notifications is not configurable.
+`WEBHOOK_URL` is optional. When it is absent, no webhook request is attempted and
+the report has `webhookAttempted: false` and `webhookOk: undefined`; D1 stores
+`webhook_attempted = 0` and `webhook_ok = NULL`. When a valid URL is configured,
+exactly one attempt is made for each scheduled run, including `none-running`,
+`none-stopped`, `start`, `stop`, and pipeline error runs. `WEBHOOK_TOKEN` may be
+omitted for an unauthenticated endpoint, but cannot be set without the URL.
 
 Webhook dispatch is non-blocking with respect to the control result: the outcome is
 already fixed before dispatch begins.
@@ -470,9 +480,10 @@ When `WEBHOOK_TOKEN` is set, each request carries
 
 ### 7.7 Delivery
 
-`WEBHOOK_URL` is called with `POST` and `content-type: application/json`. Any
-non-2xx status or thrown error is a webhook failure: it is logged, classified under
-`stage: "webhook"`, and has no other effect.
+When configured, `WEBHOOK_URL` receives `POST` with
+`content-type: application/json`. Any non-2xx status or thrown error is logged
+locally and produces `webhookOk: false`; it has no other effect on the report or
+control outcome. When absent, the transport is not called.
 
 ## 8. HTTP surface and authentication
 
@@ -577,10 +588,11 @@ outcome.
 
 ### 9.2 Trigger semantics
 
-Row identity MUST distinguish how the run was triggered. Only **scheduled** executions
-produce rows in v1; manual queries (§8.5) do not. This keeps the history an accurate
-record of *automatic* decisions and prevents a manual read from appearing as a control
-run.
+Row identity MUST distinguish how the run was triggered. Only config-valid
+**scheduled** executions produce rows in v1; config failures exit before history
+persistence, and manual queries (§8.5) do not write. This keeps history an accurate
+record of *automatic* decisions and prevents a manual read from appearing as a
+control run.
 
 ### 9.3 Schema
 
@@ -669,9 +681,9 @@ The distinction is normative and MUST be visible in code and tests:
 | ECS describe | Yes | Yes |
 | `decision()` | Yes | Yes |
 | ECS mutation | **Never** | At most one, per §6.3 |
-| Webhook dispatch | **No** | Every execution (§7.2) |
-| D1 write | **No** | Every execution (§9.2) |
-| Failure surface | HTTP response | Webhook + D1 + log |
+| Webhook dispatch | **No** | One attempt per execution when configured (§7.2) |
+| D1 write | **No** | Every config-valid execution (§9.2) |
+| Failure surface | HTTP response | D1 + optional webhook |
 
 The two paths share the read and decide logic but diverge strictly before any act. The
 manual path is not a weakened or bypassed version of the scheduled path; it is a
@@ -709,7 +721,7 @@ baseline (144 tests) is retained and MUST NOT be reduced.**
 | ECS | All five statuses; unknown status; instance absent; both mutations; each failure path; asynchronous post-state |
 | Decision | Full action matrix in §6.3, including every `fail-safe` row; purity (no I/O) |
 | Idempotency | No mutation when observed already equals desired, including transitional forms |
-| Webhook | Success payload; each error stage; bearer present/absent; non-2xx; thrown error; control flow unaffected; attempted on every scheduled execution |
+| Webhook | Configured and absent paths; success payload; each error stage; bearer present/absent; non-2xx; thrown error; control flow unaffected; one attempt per scheduled execution when configured |
 | Config | Each validation failure in §2.4 |
 | HTTP | `GET /health` succeeds and is inert; unknown route ⇒ 404; wrong method ⇒ 405 |
 | **Auth** | Valid Basic; invalid Basic; malformed Basic; missing `ADMIN_TOKEN` fails closed; Bearer path; timing-safe comparison does not short-circuit |
@@ -729,7 +741,7 @@ any existing test of that kind MUST be removed rather than re-pinned.
 
 | # | Criterion | Verified by |
 | --- | --- | --- |
-| A1 | CDT failure ⇒ zero ECS mutations, error webhook, exit | CDT + pipeline tests |
+| A1 | CDT failure ⇒ zero ECS mutations, error report, one webhook attempt when configured, exit | CDT + pipeline tests |
 | A2 | Missing/invalid traffic never becomes `0` | CDT validation tests |
 | A3 | Desired equals observed ⇒ no mutation | Idempotency tests |
 | A4 | Webhook failure cannot alter ECS control | Webhook isolation tests |

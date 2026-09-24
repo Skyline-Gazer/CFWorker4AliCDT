@@ -44,7 +44,7 @@ that can only be closed by real runtime observation are marked
 
 | # | Criterion | Status | Evidence |
 | --- | --- | --- | --- |
-| **A1** | CDT failure ⇒ zero ECS mutations, error webhook, exit | **PASS** | `test/monitor/execute.test.ts` asserts the **mutation count** is zero for CDT transport failure and unavailable traffic, with the correct stage; `test/index.test.ts` asserts the webhook is still attempted. |
+| **A1** | CDT failure ⇒ zero ECS mutations, error report, exit; notify once when configured | **PASS** | `test/monitor/execute.test.ts` asserts the **mutation count** is zero for CDT transport failure and unavailable traffic, with the correct stage; scheduled integration covers configured notification and no-webhook operation. |
 | **A2** | Missing/invalid traffic never becomes `0` | **PASS** | `test/aliyun/api.test.ts` ×16 fail-closed cases; `test/storage/schema.test.ts` asserts NULL round-trips as NULL and is distinguishable from a genuine `0`. |
 | **A3** | Desired equals observed ⇒ no mutation | **PASS** | `test/monitor/decision.test.ts` asserts `none-*` for all matching states including transitional forms; `test/monitor/execute.test.ts` asserts zero calls on a no-op. |
 | **A4** | Webhook failure cannot alter ECS control | **PASS** | `test/monitor/execute.test.ts`: a rejecting and a throwing webhook both leave the action and the mutation count unchanged. |
@@ -130,7 +130,8 @@ V1_RELEASE_READY=NO
 2. **Authorize the protected GitHub Environment** with required reviewers, so no
    unattended push can deploy.
 3. **Confirm the pre-deployment checklist** in `docs/operations/deployment.md` §1 —
-   all seven variables and all five secrets.
+   all seven variables and the three required RELEASE secrets. The optional
+   webhook pair is needed only when notification is wanted; a token requires its URL.
 4. **Merge #47** and perform the first deployment.
 5. **Run the first-run verification** (assumptions register §4) and record the
    measured `cpuTime` as evidence for #28; use it for the owner-reviewed plan
