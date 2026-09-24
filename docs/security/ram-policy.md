@@ -91,22 +91,26 @@ a commit.**
 4. **Scope the identity further if available.** If the account uses RAM
    permission boundaries or a tag-based condition, restricting to the single
    instance is preferable to `*`; record what was applied.
-5. **Set the Worker secrets** (values pasted only into the shell prompt):
+5. **Set the three required Worker secrets** (values pasted only into the shell prompt):
 
    ```
    npx wrangler secret put ALIYUN_ACCESS_KEY_ID
    npx wrangler secret put ALIYUN_ACCESS_KEY_SECRET
-   npx wrangler secret put WEBHOOK_URL
-   npx wrangler secret put WEBHOOK_TOKEN
    npx wrangler secret put ADMIN_TOKEN
    ```
 
    Each command prompts for the value. It is not echoed to the terminal, not
    stored in shell history, and not written to any file.
 
+   Webhook reporting is optional. When enabled, set `WEBHOOK_URL` to an absolute
+   HTTPS endpoint. Set `WEBHOOK_TOKEN` only when bearer auth is needed; a token
+   without the URL is a Worker config error.
+
 6. **Verify by absence, not by printing.** Do not run any command that echoes a
    secret to confirm it was set. Confirm through the deployment (§ the deployment
-   document), which fails loudly when a required secret is missing.
+   document), which fails loudly when a required secret is missing. RELEASE
+   requires the two Alibaba credentials and `ADMIN_TOKEN`; webhook secrets are
+   optional.
 
 ## 5. Verification the policy is minimal
 

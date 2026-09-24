@@ -12,9 +12,8 @@
  * the only place they can be lost:
  *
  * **A scheduled run cannot reject.** `scheduled()` catches everything. A rejection
- * escapes into the Cron runtime and means the webhook and history row were never
- * attempted — a run that cannot report its failure is worse than one that reports
- * it. The pipeline itself is written not to throw; this is the backstop.
+ * escapes into the Cron runtime and can skip D1 history and any configured webhook
+ * notification. The pipeline itself is written not to throw; this is the backstop.
  *
  * **The fetch handler never runs the monitor.** There is no route that triggers a
  * scheduled run. An unauthenticated HTTP path capable of driving the control loop
@@ -45,8 +44,8 @@ import { redact } from "./redact";
 export interface Env {
   readonly ALIYUN_ACCESS_KEY_ID?: string;
   readonly ALIYUN_ACCESS_KEY_SECRET?: string;
-  readonly WEBHOOK_URL?: string;
-  readonly WEBHOOK_TOKEN?: string;
+  readonly WEBHOOK_URL?: string | undefined;
+  readonly WEBHOOK_TOKEN?: string | undefined;
   readonly REGION_ID?: string;
   readonly ECS_INSTANCE_ID?: string;
   readonly TRAFFIC_THRESHOLD_GB?: string;
@@ -69,6 +68,17 @@ export const healthResponse: HealthResponse = {
   status: "ok",
   service: "cfworker4alicdt",
 };
+
+/** A config-error report may only use a usable HTTPS endpoint. */
+function isUsableWebhookUrl(value: string | undefined): value is string {
+  if (typeof value !== "string" || value.trim() === "") return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname !== "";
+  } catch {
+    return false;
+  }
+}
 
 /** Turn a validated `Config` into the API context the pipeline needs. */
 function pipelineDeps(config: Config) {
@@ -133,43 +143,54 @@ async function runScheduled(env: Env): Promise<void> {
   const parsed = loadConfig(env);
 
   if (!parsed.ok) {
-    // Configuration failures still report: the owner requires notification on
-    // every execution, and a misconfiguration is exactly when silence is least
-    // acceptable (SPEC §7.2).
-    try {
-      await notify(
-        { webhookUrl: env.WEBHOOK_URL ?? "", webhookToken: env.WEBHOOK_TOKEN },
-        {
-          status: "error",
-          trafficGB: undefined,
-          thresholdGB: 0,
-          ecsStatusBefore: undefined,
-          ecsStatusAfter: undefined,
-          desired: undefined,
-          action: undefined,
-          stoppedModeRequested: undefined,
-          instanceId: env.ECS_INSTANCE_ID ?? "(unset)",
-          region: env.REGION_ID ?? "(unset)",
-          time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-          durationMs: 0,
-          stage: "config",
-          error: parsed.error.message,
-        },
-      );
-    } catch {
-      // Reporting a config failure must not itself fail the run.
+    // When an independently usable notification endpoint is configured, report
+    // the configuration error. Never call the transport with an absent or
+    // malformed URL.
+    const webhookUrl = env.WEBHOOK_URL;
+    if (isUsableWebhookUrl(webhookUrl)) {
+      const webhookToken =
+        typeof env.WEBHOOK_TOKEN === "string" && env.WEBHOOK_TOKEN.trim() !== ""
+          ? env.WEBHOOK_TOKEN
+          : undefined;
+      try {
+        await notify(
+          { webhookUrl, webhookToken },
+          {
+            status: "error",
+            trafficGB: undefined,
+            thresholdGB: 0,
+            ecsStatusBefore: undefined,
+            ecsStatusAfter: undefined,
+            desired: undefined,
+            action: undefined,
+            stoppedModeRequested: undefined,
+            instanceId: env.ECS_INSTANCE_ID ?? "(unset)",
+            region: env.REGION_ID ?? "(unset)",
+            time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+            durationMs: 0,
+            stage: "config",
+            error: parsed.error.message,
+          },
+        );
+      } catch {
+        // Reporting a config failure must not itself fail the run.
+      }
     }
     return;
   }
 
   const config = parsed.config;
+  const webhookUrl = config.webhookUrl;
+  const notifier =
+    webhookUrl === undefined
+      ? {}
+      : {
+          notify: (r: RunReport) => notify({ webhookUrl, webhookToken: config.webhookToken }, r),
+        };
   const report = await runPipeline(
     {
       ...pipelineDeps(config),
-      // The webhook is a reporting side channel the pipeline dispatches itself,
-      // so the pipeline owns the transport and the run stays one unit.
-      notify: (r) =>
-        notify({ webhookUrl: config.webhookUrl, webhookToken: config.webhookToken }, r),
+      ...notifier,
       now: Date.now,
     },
     config,

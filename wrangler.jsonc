@@ -18,16 +18,13 @@
   // The Workers Free platform CPU allowance applies automatically. Custom
   // limits.cpu_ms is unsupported on Free; see docs/operations/deployment.md §7.
 
-  // Deployment fails loudly if any of these is missing, rather than failing at
-  // the first scheduled run (SPEC §2.1). Never put values here.
+  // Release requires the Alibaba credentials and ADMIN_TOKEN. Never put values here.
   //
-  // `ADMIN_TOKEN` is listed as required because SPEC §2.1 marks it so: without it
-  // every dashboard and API route denies (SPEC §8.3), which is a fail-closed
-  // outcome but not a working deployment. `WEBHOOK_TOKEN` is deliberately absent
-  // because SPEC §2.1 marks it optional — requiring it would reject a valid
-  // deployment that uses an unauthenticated webhook endpoint.
+  // WEBHOOK_URL and WEBHOOK_TOKEN are an optional notification pair. A token
+  // without a URL is rejected by runtime config validation; neither is required
+  // for scheduled control or D1 history.
   "secrets": {
-    "required": ["ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET", "WEBHOOK_URL", "ADMIN_TOKEN"],
+    "required": ["ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET", "ADMIN_TOKEN"],
   },
 
   // Non-secret defaults, matching SPEC §2.2 field-for-field. This file is the

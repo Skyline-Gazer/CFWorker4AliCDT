@@ -12,9 +12,9 @@
  * "at most one mutation per run" is a property of the shape of the code rather
  * than a rule a future edit has to remember.
  *
- * **Notification is a side channel that cannot throw into control.** Every
- * `notify` call is wrapped, and the report is assembled before it is dispatched,
- * so a webhook failure cannot alter what was recorded or what was done.
+ * **Configured notification is a side channel that cannot throw into control.**
+ * The report is assembled before dispatch, so a webhook failure cannot alter
+ * what was recorded or what was done. With no notifier, notification is skipped.
  */
 
 import type { Config } from "../config";
@@ -57,7 +57,7 @@ export interface PipelineDeps {
     stoppedMode: "StopCharging" | "KeepCharging",
   ) => Promise<{ readonly requested: true } | RpcError>;
   /** Reporting side channel. Its result never affects control (SPEC §7.1). */
-  readonly notify: (report: RunReport) => Promise<{ readonly ok: boolean }>;
+  readonly notify?: ((report: RunReport) => Promise<{ readonly ok: boolean }>) | undefined;
   readonly now: () => number;
 }
 
@@ -120,13 +120,13 @@ function isoUtc(ms: number): string {
 }
 
 /**
- * Dispatch the webhook without letting it affect control (SPEC §7.1).
+ * Dispatch a configured webhook without letting it affect control (SPEC §7.1).
  *
  * Returns whether it succeeded; never throws. The report is already assembled by
  * the caller, so a failure here cannot change what was recorded.
  */
 async function safeNotify(
-  notify: PipelineDeps["notify"],
+  notify: NonNullable<PipelineDeps["notify"]>,
   report: RunReport,
 ): Promise<{ attempted: boolean; ok: boolean | undefined }> {
   try {
@@ -294,7 +294,7 @@ async function issueMutation(
   return { error: undefined };
 }
 
-/** Assemble the report, dispatch the webhook, and return the report unchanged. */
+/** Assemble the report, optionally dispatch the webhook, and return its result. */
 async function finish(
   deps: PipelineDeps,
   startedAt: number,
@@ -317,6 +317,10 @@ async function finish(
     webhookAttempted: false,
     webhookOk: undefined,
   };
+
+  // No configured reporter means no transport call and leaves the report's
+  // explicit no-attempt values intact.
+  if (deps.notify === undefined) return draft;
 
   // The report is fully assembled before dispatch, so the webhook cannot change
   // it. `safeNotify` cannot throw.

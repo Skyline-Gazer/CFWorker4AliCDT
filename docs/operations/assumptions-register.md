@@ -65,8 +65,8 @@ allowance. **Not inherently fail-safe**, which is why verification is required
 before scheduled authority is granted rather than afterwards.
 In the meantime: the conversion lives in exactly one named function
 (`trafficBytesToDecimalGb`), so a corrected unit is a one-line change, and the
-figure is recorded in the webhook payload and D1 so a wrong unit is auditable
-after the fact (PLAN R4).
+figure is recorded in D1 and, when webhook reporting is configured, in the webhook
+payload so a wrong unit is auditable after the fact (PLAN R4).
 
 ### A4 — The threshold unit is **decimal** GB (`10^9` bytes)
 Evidence: **owner decision**, not an external fact. Recorded because it is a
@@ -178,10 +178,11 @@ If wrong: the first deployment fails, loudly, before any Worker runs. It fails
 **closed**, and the remedy is to scaffold the Worker another way or pass secrets on
 the command line — neither of which is wanted.
 In the meantime: the PRE-FLIGHT generated config declares `secrets: { required: [] }`,
-so the first deploy can succeed; **RELEASE restores the full required list**, so from
-the first release onward a missing secret still fails the deployment loudly. Note
-that `wrangler deploy --dry-run` does **not** surface this, because validation runs
-on the real upload path.
+so the first deploy can succeed; **RELEASE requires exactly the Alibaba AccessKey ID,
+Alibaba AccessKey secret, and `ADMIN_TOKEN`**, so a missing required secret still
+fails deployment loudly. Webhook secrets are optional. Note that
+`wrangler deploy --dry-run` does **not** surface this, because validation runs on
+the real upload path.
 
 ### A13 — Required runtime vars must be injected at generation time, not discovered late
 Evidence: **verified by exercise.** `src/config.ts` requires `REGION_ID` and
@@ -258,9 +259,8 @@ is a separate owner action that restores `*/10 * * * *`.
 7. **Confirm the observed state.** Verify `ecsStatus` matches the console for the
    managed instance.
 8. **Only then authorize RELEASE.** Once Cron is enabled, the first scheduled run
-   should again be read: confirm the webhook payload agrees with the figures
-   established above, and confirm a below-threshold run is a `none-*` no-op with the
-   instance untouched.
+   should again be read: confirm the webhook payload agrees with the figures when webhook reporting is configured, or confirm the D1 row records the figures with webhook result NULL when it is not.
+   Confirm a below-threshold run is a `none-*` no-op with the instance untouched.
 9. **Measure CPU (A8).** Read the first scheduled invocation's `cpuTime` and record
    the required plan in the deployment documentation.
 

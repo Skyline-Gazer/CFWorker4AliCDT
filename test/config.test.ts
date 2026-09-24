@@ -20,7 +20,6 @@ import type { RawEnv } from "../src/config";
 const VALID: RawEnv = {
   ALIYUN_ACCESS_KEY_ID: "AKID",
   ALIYUN_ACCESS_KEY_SECRET: "SECRET",
-  WEBHOOK_URL: "https://example.test/hook",
   REGION_ID: "cn-hongkong",
   ECS_INSTANCE_ID: "i-abc123",
 };
@@ -44,7 +43,8 @@ describe("loadConfig — defaults (SPEC §2.2)", () => {
     if (!result.ok) return;
     expect(result.config.regionId).toBe("cn-hongkong");
     expect(result.config.ecsInstanceId).toBe("i-abc123");
-    expect(result.config.webhookUrl).toBe("https://example.test/hook");
+    expect(result.config.webhookUrl).toBeUndefined();
+    expect(result.config.webhookToken).toBeUndefined();
   });
 
   it("honours overrides for every optional binding", () => {
@@ -72,7 +72,6 @@ describe("loadConfig — required bindings (SPEC §2.4)", () => {
   const required = [
     "ALIYUN_ACCESS_KEY_ID",
     "ALIYUN_ACCESS_KEY_SECRET",
-    "WEBHOOK_URL",
     "REGION_ID",
     "ECS_INSTANCE_ID",
   ] as const;
@@ -194,6 +193,31 @@ describe("loadConfig — enum bindings (SPEC §2.4)", () => {
 });
 
 describe("loadConfig — WEBHOOK_URL (SPEC §2.4)", () => {
+  it.each([undefined, "", "   "])("allows an absent or empty URL without a token (%o)", (value) => {
+    const result = loadConfig({ ...VALID, WEBHOOK_URL: value });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.webhookUrl).toBeUndefined();
+    expect(result.config.webhookToken).toBeUndefined();
+  });
+
+  it("requires a URL when a non-empty token is configured without one", () => {
+    const result = loadConfig({ ...VALID, WEBHOOK_TOKEN: "private-token-value" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("WEBHOOK_TOKEN");
+    expect(result.error.message).toContain("WEBHOOK_URL");
+    expect(result.error.message).not.toContain("private-token-value");
+  });
+
+  it.each(["", "   "])("treats an empty token as absent when URL is absent (%o)", (token) => {
+    const result = loadConfig({ ...VALID, WEBHOOK_TOKEN: token });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.webhookUrl).toBeUndefined();
+    expect(result.config.webhookToken).toBeUndefined();
+  });
+
   it.each(["http://example.test/hook", "example.test/hook", "ftp://example.test", "/relative"])(
     "rejects non-https URL %o",
     (value) => {
@@ -204,6 +228,14 @@ describe("loadConfig — WEBHOOK_URL (SPEC §2.4)", () => {
 
   it("accepts an absolute https URL", () => {
     expect(loadConfig({ ...VALID, WEBHOOK_URL: "https://hooks.example.test/x?y=1" }).ok).toBe(true);
+  });
+
+  it("accepts a URL without a token", () => {
+    const result = loadConfig({ ...VALID, WEBHOOK_URL: "https://hooks.example.test/run" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.webhookUrl).toBe("https://hooks.example.test/run");
+    expect(result.config.webhookToken).toBeUndefined();
   });
 });
 

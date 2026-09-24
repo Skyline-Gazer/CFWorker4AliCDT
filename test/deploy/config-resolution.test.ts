@@ -322,7 +322,6 @@ describe("RELEASE generation — Cron authority", () => {
     expect(secrets?.required).toEqual([
       "ALIYUN_ACCESS_KEY_ID",
       "ALIYUN_ACCESS_KEY_SECRET",
-      "WEBHOOK_URL",
       "ADMIN_TOKEN",
     ]);
   });

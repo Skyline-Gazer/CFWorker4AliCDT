@@ -129,15 +129,15 @@ does **not** re-implement runtime semantic validation — whether the threshold 
 positive number or the signature version is `v2`/`v3` remains `loadConfig()`'s job,
 so there is exactly one implementation of each rule.
 
-### 1c. Worker Secrets — five names, values never committed
+### 1c. Worker Secrets — required and optional names, values never committed
 
 | Secret | Requirement | Confirmed? |
 | --- | --- | --- |
-| `ALIYUN_ACCESS_KEY_ID` | From the RAM user in `docs/security/ram-policy.md`. | ☐ |
-| `ALIYUN_ACCESS_KEY_SECRET` | Its paired secret. | ☐ |
-| `WEBHOOK_URL` | An absolute `https://` URL. Validated at config time. | ☐ |
-| `WEBHOOK_TOKEN` | Optional. When set, sent as `Authorization: Bearer <token>`. | ☐ |
-| `ADMIN_TOKEN` | **Required for the dashboard/API.** Absent ⇒ every protected route denies. | ☐ |
+| `ALIYUN_ACCESS_KEY_ID` | **Required by RELEASE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
+| `ALIYUN_ACCESS_KEY_SECRET` | **Required by RELEASE.** Its paired secret. | ☐ |
+| `WEBHOOK_URL` | Optional. When set, must be absolute `https://` and enables one webhook attempt per scheduled run. | ☐ |
+| `WEBHOOK_TOKEN` | Optional with `WEBHOOK_URL`. When set, sent as `Authorization: Bearer <token>`; token alone is a config error. | ☐ |
+| `ADMIN_TOKEN` | **Required by RELEASE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
 
 ### External confirmations
 
@@ -145,17 +145,19 @@ so there is exactly one implementation of each rule.
 | --- | --- |
 | The RAM policy grants **exactly four** actions and no wildcard action. | ☐ |
 | The instance's current state is known, and stopping it is acceptable. | ☐ |
-| The webhook endpoint is reachable and will record what it receives. | ☐ |
+| If webhook reporting is configured, the endpoint is reachable and will record what it receives. | ☐ |
 | The Cloudflare account plan matches what §7 concludes. | ☐ |
 | A D1 database exists for the binding, or a decision to run without history is recorded. | ☐ |
 | The HTTP exposure decision has been made (see §3c), or a record exists of choosing none. | ☐ |
 | `REGION_ID` and `ECS_INSTANCE_ID` are set as repository **variables** (not secrets). | ☐ |
 
-**Set the Worker Secrets during preflight.** The PRE-FLIGHT deploy cannot declare
-`secrets.required` (the Worker does not exist yet — see §3b), so an unset secret is
-not caught until RELEASE, where the deployment fails loudly. Setting all five
-secrets during preflight is the safe order, and their version semantics are
-explained in §3b step 2.
+**Set the required Worker Secrets during preflight.** The PRE-FLIGHT deploy cannot
+declare `secrets.required` (the Worker does not exist yet — see §3b), so missing
+required secrets are not caught until RELEASE, where deployment fails loudly. Set
+`ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN`. Configure
+`WEBHOOK_URL` and, optionally, `WEBHOOK_TOKEN` only when notification is wanted;
+`WEBHOOK_TOKEN` without `WEBHOOK_URL` is a runtime config error. Their version
+semantics are explained in §3b step 2.
 
 ## 2. Setting Worker Secrets
 
@@ -165,10 +167,11 @@ written to a file.
 ```sh
 npx wrangler secret put ALIYUN_ACCESS_KEY_ID
 npx wrangler secret put ALIYUN_ACCESS_KEY_SECRET
-npx wrangler secret put WEBHOOK_URL
-npx wrangler secret put WEBHOOK_TOKEN
 npx wrangler secret put ADMIN_TOKEN
 ```
+
+Optional webhook reporting uses `WEBHOOK_URL`; when authentication is required,
+also set `WEBHOOK_TOKEN`. Never set the token without the URL.
 
 Cloudflare's secret UI is an equivalent alternative; the choice does not affect the
 outcome.
@@ -244,8 +247,9 @@ operation as "have no schedule".
 secrets — it refuses with *"This Worker does not exist yet, so secrets cannot be
 set in advance with `wrangler secret put`."* So a first deploy that declared
 `secrets.required` could never succeed. The preflight config therefore declares
-`required: []`, and **RELEASE restores the full list**, where the Worker exists and
-the fail-loudly-on-a-missing-secret guarantee applies.
+`required: []`, and **RELEASE requires exactly the two Alibaba credentials and
+`ADMIN_TOKEN`**, where the Worker exists and the fail-loudly-on-a-missing-secret
+guarantee applies. The optional webhook pair is not in `secrets.required`.
 
 This is a real constraint on the bootstrap order, not a relaxed safety property:
 from the first *release* onward, a missing secret still fails the deployment loudly.
@@ -270,14 +274,16 @@ absent, so nothing can act on a wrong figure.
 > versions, because they all descend from the preflight config that declares
 > `triggers.crons = []`. What changes is which version URL you point the checks at.
 
-Configure the secrets required for a *useful* live verification — without the
-first four, `loadConfig()` fails and `/api/query` cannot return anything:
+Configure the three required Worker Secrets for a *useful* live verification —
+without the Alibaba credentials and `ADMIN_TOKEN`, `loadConfig()` or HTTP
+authentication fails and `/api/query` cannot return anything:
 
 - `ALIYUN_ACCESS_KEY_ID`
 - `ALIYUN_ACCESS_KEY_SECRET`
-- `WEBHOOK_URL`
 - `ADMIN_TOKEN`
-- `WEBHOOK_TOKEN` — optional, only when the webhook endpoint requires it
+
+Webhook reporting is optional. If configuring it, set `WEBHOOK_URL` to an absolute
+HTTPS URL; set `WEBHOOK_TOKEN` only if the endpoint requires bearer authentication.
 
 Then perform the read-only verification in §6 against the latest Version URL.
 
@@ -477,9 +483,9 @@ already able to be stopped by it.
 
 ### The sequence
 
-**Prerequisite:** the five Worker Secrets from §1c are configured (§3b step 2). The
-first four are needed for a meaningful result — without them `loadConfig()` fails
-and `/api/query` cannot return traffic at all.
+**Prerequisite:** the three required Worker Secrets from §1c are configured (§3b
+step 2). The two Alibaba credentials enable the live query; `ADMIN_TOKEN` enables
+the authenticated HTTP route. Webhook configuration is optional.
 
 1. **`GET /health`** — public, inert. Confirms the Worker is reachable and returns
    `200` with no Alibaba call and no D1 read.
@@ -511,7 +517,9 @@ and `/api/query` cannot return traffic at all.
 
 ### Reading the output afterwards
 
-**Webhook.** One report per scheduled execution, including no-ops. `status:
+**Webhook.** When `WEBHOOK_URL` is configured, one report attempt is made per
+scheduled execution, including no-ops. With no URL, there are zero webhook
+requests, and D1 history still records the run with `webhook_ok = NULL`. `status:
 "success"` carries the traffic, states before/after, the action, and the duration;
 `status: "error"` carries a `stage` and a sanitised message. A webhook failure is
 logged locally and does not affect control.

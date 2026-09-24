@@ -32,8 +32,8 @@ Every 10 minutes, on a Cron Trigger:
 3. Decide the desired state from a threshold rule.
 4. Perform **at most one** mutation, and only if the desired state differs from the
    observed one.
-5. Report the outcome to a webhook.
-6. Record the outcome in D1 as monitoring history.
+5. If the optional webhook is configured, send one report for the run.
+6. Record the outcome in D1 as monitoring history, whether or not a webhook is configured.
 
 ## The central invariant
 
@@ -41,7 +41,8 @@ Every 10 minutes, on a Cron Trigger:
 > value is zero.**
 
 In plain language: **if traffic cannot be determined, nothing is started or stopped.**
-The instance is left exactly as found, and an error is reported.
+The instance is left exactly as found. The error is recorded in D1 and sent to the
+webhook when that optional notification endpoint is configured.
 
 This is deliberately asymmetric. A false abort costs one monitoring interval. A
 false "under threshold" costs money and cannot be undone retroactively. Everything
@@ -96,15 +97,19 @@ HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`), wi
 no default; the committed config exposes no stable endpoint. Full procedure:
 [`docs/operations/deployment.md`](docs/operations/deployment.md).
 
-Five secrets (set via `wrangler secret put`; never committed):
+Required RELEASE secrets and optional notification secrets (set via
+`wrangler secret put`; never committed):
 
-| Secret                     | Notes                                                                      |
-| -------------------------- | -------------------------------------------------------------------------- |
-| `ALIYUN_ACCESS_KEY_ID`     | From the least-privilege RAM user.                                         |
-| `ALIYUN_ACCESS_KEY_SECRET` | Its paired secret.                                                         |
-| `WEBHOOK_URL`              | Absolute `https://` URL. Validated at config time.                         |
-| `WEBHOOK_TOKEN`            | Optional. Sent as `Authorization: Bearer <token>`.                         |
-| `ADMIN_TOKEN`              | Required for the dashboard and API. Absent ⇒ every protected route denies. |
+| Secret                     | Requirement         | Notes                                                                                              |
+| -------------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
+| `ALIYUN_ACCESS_KEY_ID`     | Required            | From the least-privilege RAM user.                                                                 |
+| `ALIYUN_ACCESS_KEY_SECRET` | Required            | Its paired secret.                                                                                 |
+| `ADMIN_TOKEN`              | Required by RELEASE | Dashboard and API credential. Absent ⇒ every protected route denies.                               |
+| `WEBHOOK_URL`              | Optional            | If set, must be an absolute `https://` URL and enables one notification attempt per scheduled run. |
+| `WEBHOOK_TOKEN`            | Optional with URL   | Sent as `Authorization: Bearer <token>`. A token without `WEBHOOK_URL` is a config error.          |
+
+The Worker runs scheduled control and records history without webhook secrets. The
+webhook is observational when enabled; its failures cannot affect ECS control.
 
 Seven plain variables, as three distinct classes — see
 [`docs/operations/deployment.md`](docs/operations/deployment.md) §1a:
