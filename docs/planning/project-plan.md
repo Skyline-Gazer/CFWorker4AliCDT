@@ -767,7 +767,7 @@ test, implement, make it pass, refactor.
 | R5 | Decimal GB (`1000^3`) is a deliberate break from the prior script and both reference implementations (`1024^3`). 180 GB decimal = 167.6 GiB, so enforcement trips **earlier** for the same byte count. | Behavioural surprise for anyone migrating. | Owner-selected. Documented explicitly as a divergence in the SPEC and README; never silently inherited. |
 | R6 | Asynchronous ECS operations mean the observed state after a call is transitional, not terminal. | A naive implementation would poll, exceed runtime limits, or report a false final state. | One immediate follow-up describe only. `Starting`/`Stopping` are reported as valid observed states. No long-polling. |
 | R7 | `StoppedMode` is silently ignored for unsupported instances. | Billing behaves differently than configured, with no error. | Pin `StoppedMode` explicitly and document the silent-ignore behaviour; never rely on account defaults. |
-| R8 | Cron CPU limit is 10 ms on the free plan. | Runs are terminated mid-flight. | Measure actual CPU. D1 writes add work to the scheduled path; if the free plan is insufficient, the paid plan is a documented prerequisite rather than a silent assumption. |
+| R8 | Workers Free applies a 10 ms Cron CPU allowance automatically; custom `limits.cpu_ms` is unsupported on Free. | Runs above the platform allowance are terminated mid-flight. | Measure actual Cron `cpuTime` after RELEASE. Remain on Free initially; consider Paid / Standard Usage Model only if measured usage warrants it and the owner chooses it. Configure a custom CPU limit only with that plan and owner choice. |
 | R9 | Workers Logs persist by default. | Secret leakage into retained logs. | Centralised redaction; secrets never interpolated into log or error strings; tested. |
 | R10 | CI or a test could accidentally perform a live mutation. | Unintended instance stop/start. | All network mocked; no credentials in CI; deployment is manual, environment-gated, and separate from PR CI. |
 | **R11** | **Branch protection** — previously unenforceable (private repo, free org plan, GitHub returned 403). | A direct push to `main` would bypass CI and review. | **Resolved (2026-09-22):** the repository is now public, so the intended ruleset can be applied. Owner instructed it be enabled; tracked by Issue #15. |
@@ -810,10 +810,12 @@ During this revision **no** Issue is created, closed, or edited.
 
 **Resolved by the owner (2026-09-22):**
 
-7. **Q4 — Cloudflare plan.** Remain on the **Free** plan initially and implement within
-   the 10 ms Cron CPU budget; benchmark actual HTTP and Cron CPU usage and upgrade to
-   Paid only if the measured usage or risk requires it. The required plan is still to be
-   stated in the deployment documentation once measured (§14).
+7. **Q4 — Cloudflare plan.** Remain on the **Free** plan initially; its 10 ms Cron CPU
+   allowance is applied automatically, and Free deployment configs must omit custom
+   `limits.cpu_ms`. Measure actual Cron `cpuTime` after RELEASE. Consider Paid / Standard
+   Usage Model only if measured usage or risk warrants it and the owner chooses it; any
+   custom CPU limit requires that plan and an explicit owner choice. The required plan
+   conclusion remains pending measurement (§14).
 8. **Q5 — History retention.** Retain `traffic_checks` rows **indefinitely in v1**; no
    automatic deletion. Pruning remains an explicit operations task if it is later needed.
 9. **Q6 — Repository visibility / plan.** The repository is **public**; branch protection

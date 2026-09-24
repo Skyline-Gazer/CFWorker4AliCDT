@@ -526,23 +526,27 @@ make it act.
 
 ## 7. Cloudflare plan requirement
 
-**Measured figure: pending a first deployment.**
+**Measured Cron `cpuTime`: pending a successful production RELEASE.**
 
-The requirement is derived from measured CPU per scheduled invocation, not
-asserted, because the plan's CPU limit is the binding constraint:
+Workers Free applies its 10 ms CPU allowance automatically. Do not configure a
+custom `limits.cpu_ms` in `wrangler.jsonc` or either generated deploy config:
+Cloudflare rejects custom CPU limits on Free with error **100328**. The Worker
+stays on Free while actual Cron CPU usage is measured.
 
-| Plan | Cron CPU per invocation | Consequence |
+| Account model | Platform Cron CPU allowance (< 1 hour interval) | Deployment rule |
 | --- | --- | --- |
-| Workers Free | **10 ms** | A run exceeding it may be terminated mid-flight. |
-| Workers Paid | 30 s (< 1 hour interval) | Ample headroom. |
+| Workers Free | **10 ms**, applied automatically | Omit custom `limits.cpu_ms`. |
+| Workers Paid / Standard Usage Model | 30 s | Consider a custom limit only after measured evidence and an explicit owner choice. |
 
 Network waiting — the CDT call, the ECS call, the D1 write, the webhook — does
 **not** consume CPU. What does is JSON parsing, redaction, and rendering.
 
 **How to derive it:** after RELEASE, read the Cron invocation's `cpuTime` from
-Workers observability and record it here. The owner's decision is to remain on
-**Free** initially and upgrade only if the measured figure requires it (PLAN Q4,
-resolved 2026-09-22).
+Workers observability and record it here. Issue #28 remains open pending that
+measurement; Issue #31 remains open pending the plan conclusion based on the
+measurement. The owner's decision is to remain on **Free** initially. Any later
+move to Paid / Standard Usage Model, and any custom CPU limit there, requires
+measured evidence and an explicit owner choice (PLAN Q4, decided 2026-09-22).
 
 A terminated run issues **no** mutation, so it aborts safely — but it also reports
 nothing, which is why the figure must be recorded rather than assumed.
