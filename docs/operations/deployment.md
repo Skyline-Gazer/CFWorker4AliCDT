@@ -107,7 +107,7 @@ place a default is stated:
 
 | Variable | Committed default | Notes |
 | --- | --- | --- |
-| `TRAFFIC_THRESHOLD_GB` | `180` | Threshold in **decimal GB**. See §5 on the unit. |
+| `TRAFFIC_THRESHOLD_GB` | `180` | Threshold in console-aligned GB; calculated with a `1024^3` divisor. See §5. |
 | `CDT_ENDPOINT` | `cdt.aliyuncs.com` | **Unverified** (A1). Confirm at first run. |
 | `BUSINESS_REGION_ID` | *(absent)* | When unset, no CDT filter is applied. |
 | `SIGNATURE_VERSION` | `v3` | `v2` or `v3`. See §6 if the first run is rejected. |
@@ -453,15 +453,17 @@ instance exists to provide. Confirm the address survives a stop/start cycle
   ignores it. The system therefore reports the mode as **requested**, never as
   applied, and no logic depends on it having applied.
 
-## 5. The decimal-GB divergence
+## 5. Traffic GB and the CDT console
 
-The threshold is **decimal gigabytes** (`10^9` bytes), not binary (`1024^3`). This
-is deliberate and diverges from the prior script and both reference
-implementations. **180 GB decimal equals 167.6 GiB**, so enforcement trips
-**earlier** for the same byte count.
+The public field and threshold keep the `GB` label to align with the Alibaba CDT
+console. Convert raw CDT `Traffic` bytes with `trafficGB = trafficBytes / 1024^3`;
+the divisor is `1,073,741,824`, not SI decimal `10^9`. This is the GiB-scale
+calculation displayed under CDT's `GB` label. The default `TRAFFIC_THRESHOLD_GB`
+remains `180`; do not change it to compensate for the unit correction.
 
-An operator migrating from the prior implementation will see the instance stop at
-what looks like a lower traffic figure. That is this behaviour, not a bug.
+Owner-provided live evidence: `27,858,630` bytes was displayed as `0.02785863` by
+the previous Worker and approximately `0.02595 GB` by the CDT console.
+`27,858,630 / 1024^3` is approximately `0.02594537 GB`, which agrees with CDT.
 
 ## 6. First-live-run verification — performed BEFORE Cron is enabled
 
@@ -500,17 +502,18 @@ the authenticated HTTP route. Webhook configuration is optional.
    read-only guarantee is structural — `QueryDeps` exposes no mutation seam — and
    this step confirms it operationally.
 5. **Compare the returned traffic against the Alibaba console for the same
-   period.** This is R4.
+   period using `trafficGB = trafficBytes / 1024^3`.** This is R4; the label is
+   `GB` to match CDT, and the divisor is not `10^9`.
 6. **Confirm the four assumptions:**
    - **R2 — CDT endpoint.** The call succeeded. A `stage: "cdt-query"` error means
      the endpoint or the signature method is wrong, **not** that traffic is zero.
    - **R3 — accepted signature method.** The call succeeded. A signature rejection
      is `SignatureDoesNotMatch` or a `4xx` at `stage: "cdt-query"`; try
      `SIGNATURE_VERSION=v2` before investigating further.
-   - **R4 — traffic unit and summation.** `trafficGB` matches the console. Treat it
-     as **unverified** until it does. A mismatch of roughly 7% suggests a
-     decimal/binary confusion (A4); orders of magnitude suggests the unit is not
-     bytes.
+   - **R4 — traffic unit and summation.** `trafficGB` matches the console when
+     calculated with `1024^3`. Treat the deployed result as **unverified** until
+     compared for the same period. A mismatch suggests investigating the raw
+     Traffic unit, period, or summation scope.
    - **ECS observed state.** `ecsStatus` matches the console for the managed
      instance.
 7. **Only then authorize RELEASE.**

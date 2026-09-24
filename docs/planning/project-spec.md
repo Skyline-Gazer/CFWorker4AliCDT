@@ -39,7 +39,7 @@ not required by RELEASE. Runtime config rejects `WEBHOOK_TOKEN` without
 | --- | --- | --- | --- |
 | `REGION_ID` | Yes | — | ECS region, e.g. `cn-hongkong`. Used to build `ecs.<REGION_ID>.aliyuncs.com`. |
 | `ECS_INSTANCE_ID` | Yes | — | The single managed instance, e.g. `i-xxxxxxxx`. |
-| `TRAFFIC_THRESHOLD_GB` | No | `180` | Threshold in **decimal GB**. |
+| `TRAFFIC_THRESHOLD_GB` | No | `180` | Threshold in console-aligned GB; one GB is `1024^3` bytes. |
 | `CDT_ENDPOINT` | No | `cdt.aliyuncs.com` | CDT API host. Configuration, not a constant (risk R2). |
 | `BUSINESS_REGION_ID` | No | unset | If set, CDT `BusinessRegionId`. See §5.3. |
 | `SIGNATURE_VERSION` | No | `v3` | `v3` or `v2`. See §4. |
@@ -81,16 +81,17 @@ binding. Non-secret bindings MAY be named in the error.
 
 ## 3. Traffic units
 
-The threshold is expressed in **decimal gigabytes**, defined as exactly
-$10^9$ bytes ($1000^3$).
+The traffic threshold and public `trafficGB` value use **console-aligned GB**.
+The display label remains `GB` to align with the Alibaba CDT console; its divisor
+is `1024^3` bytes (the GiB-scale divisor), not the SI decimal `10^9` bytes.
 
-$$\text{trafficGB} = \frac{\text{trafficBytes}}{10^{9}}$$
+$$\text{trafficGB} = \frac{\text{trafficBytes}}{1024^{3}}$$
 
-**This is a deliberate behavioural divergence.** The originating script and both
-independent reference implementations divide by $1024^3$ (GiB). Under this SPEC,
-$180$ GB is $167.6$ GiB, so for the same raw byte count enforcement trips **earlier**
-than those implementations would. This divergence MUST be documented in the README and
-MUST NOT be silently inherited or "corrected" back.
+Owner-provided live evidence confirms the console-aligned calculation: `27,858,630`
+bytes displays as approximately `0.02595 GB` in CDT, and dividing by `1024^3` gives
+approximately `0.02594537`. The public field and environment names retain `GB` for
+operator and console alignment. The default `TRAFFIC_THRESHOLD_GB` remains `180`;
+the threshold number is not adjusted to compensate for the conversion.
 
 The conversion MUST exist in exactly one named function. `Traffic` bytes MUST be
 treated as an assumption sourced from SDK typing and reference implementations (no

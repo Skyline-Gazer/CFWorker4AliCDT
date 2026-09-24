@@ -75,44 +75,43 @@ export interface TrafficReading {
    * prose source states the unit — it is inferred from the SDK's `long` typing
    * and from independent implementations. The unit MUST be verified against the
    * Alibaba console before enforcement is trusted. It is never implicit: the
-   * byte→GB boundary is crossed in exactly one named function
-   * (`trafficBytesToDecimalGb`), so a corrected unit changes one line.
+   * byte→displayed-GB boundary is crossed in exactly one named function
+   * (`trafficBytesToGb`). Its `1024^3` divisor matches CDT's GB display label.
    */
   readonly totalBytes: number;
   readonly entries: readonly TrafficBreakdownEntry[];
 }
 
 /**
- * Bytes in one decimal gigabyte, per SPEC §3.
+ * Bytes in one console-aligned GB, per SPEC §3.
  *
  * **ASSUMPTION (PLAN R4):** the divisor assumes `Traffic` is reported in bytes.
  * See `TrafficReading.totalBytes` — the unit is SDK-derived, not documented.
  *
- * Decimal (`1000^3`), **not** binary (`1024^3`). This is a deliberate divergence
- * from the originating script and both independent reference implementations:
- * 180 GB decimal is 167.6 GiB, so enforcement trips earlier for the same byte
- * count. The divergence MUST NOT be silently "corrected" back to `1024^3`
- * (PLAN R5).
+ * The operator-facing label remains `GB` to match the Alibaba CDT console, whose
+ * display uses the `1024^3` divisor. This is `1,073,741,824` bytes, not SI
+ * decimal `10^9` bytes. Owner-provided evidence: `27,858,630` bytes is displayed
+ * as approximately `0.02595 GB` by CDT and converts to `0.02594537` here.
  */
-export const BYTES_PER_DECIMAL_GB = 1_000_000_000;
+export const BYTES_PER_GB = 1024 ** 3;
 
 /**
- * Convert a byte total to decimal GB (SPEC §3).
+ * Convert a byte total to console-aligned GB using the `1024^3` divisor (SPEC §3).
  *
  * The **only** place the byte→GB boundary is crossed. Summation stays in integer
  * byte space and conversion happens exactly once, at the end, so no per-entry
  * rounding can drift the total.
  *
  * Throws `TrafficUnavailableError` for a non-finite or negative input rather
- * than returning a number: `NaN / 1e9` is still `NaN`, and a caller that
- * compared `NaN` against a threshold would take the "under threshold" branch.
- * Unavailable traffic must never become a value that can be compared.
+ * than returning a number: a non-finite result compared against a threshold
+ * could take an unintended branch. Unavailable traffic must never become a
+ * value that can be compared.
  */
-export function trafficBytesToDecimalGb(bytes: number): number {
+export function trafficBytesToGb(bytes: number): number {
   if (!Number.isFinite(bytes) || bytes < 0) {
     throw new TrafficUnavailableError("Traffic bytes were not a finite non-negative number");
   }
-  return bytes / BYTES_PER_DECIMAL_GB;
+  return bytes / BYTES_PER_GB;
 }
 
 /**

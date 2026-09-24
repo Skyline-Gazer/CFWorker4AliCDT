@@ -123,26 +123,27 @@ Seven plain variables, as three distinct classes — see
   `SIGNATURE_VERSION` (`v3`), `STOPPED_MODE` (`KeepCharging`). Unset, the committed
   `wrangler.jsonc` default is preserved.
 
-| Variable               | Default            | Notes                                            |
-| ---------------------- | ------------------ | ------------------------------------------------ |
-| `REGION_ID`            | **required**       | ECS region.                                      |
-| `ECS_INSTANCE_ID`      | **required**       | The single managed instance.                     |
-| `TRAFFIC_THRESHOLD_GB` | `180`              | **Decimal** GB. See below.                       |
-| `CDT_ENDPOINT`         | `cdt.aliyuncs.com` | Configurable because the hostname is unverified. |
-| `BUSINESS_REGION_ID`   | unset              | When set, applied as a server-side CDT filter.   |
-| `SIGNATURE_VERSION`    | `v3`               | `v2` or `v3`.                                    |
-| `STOPPED_MODE`         | `KeepCharging`     | See the deployment doc before changing.          |
+| Variable               | Default            | Notes                                                   |
+| ---------------------- | ------------------ | ------------------------------------------------------- |
+| `REGION_ID`            | **required**       | ECS region.                                             |
+| `ECS_INSTANCE_ID`      | **required**       | The single managed instance.                            |
+| `TRAFFIC_THRESHOLD_GB` | `180`              | Console-aligned GB, calculated with a `1024^3` divisor. |
+| `CDT_ENDPOINT`         | `cdt.aliyuncs.com` | Configurable because the hostname is unverified.        |
+| `BUSINESS_REGION_ID`   | unset              | When set, applied as a server-side CDT filter.          |
+| `SIGNATURE_VERSION`    | `v3`               | `v2` or `v3`.                                           |
+| `STOPPED_MODE`         | `KeepCharging`     | See the deployment doc before changing.                 |
 
 Deployment-only values (`D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`,
 `WORKER_CUSTOM_DOMAIN`) are a separate class and are not Worker runtime variables.
 
-## The decimal-GB divergence — read this if migrating
+## Traffic GB matches the CDT console
 
-The threshold is in **decimal gigabytes** (`10^9` bytes), not binary (`1024^3`).
-
-**180 GB decimal equals 167.6 GiB**, so enforcement trips **earlier** for the same
-byte count than the originating script and both reference implementations. This
-divergence is intentional and documented rather than silently inherited.
+The public traffic and threshold labels remain `GB` to align with Alibaba CDT.
+Convert raw Traffic bytes as `trafficGB = trafficBytes / 1024^3` (divisor
+`1,073,741,824`), not SI decimal `10^9`. Owner-provided live evidence: `27,858,630`
+bytes is approximately `0.02594537 GB` by this calculation, matching the CDT
+console's `0.02595 GB` display. The default `TRAFFIC_THRESHOLD_GB` remains `180`;
+the threshold is not adjusted to compensate for this conversion.
 
 ## HTTP surface
 

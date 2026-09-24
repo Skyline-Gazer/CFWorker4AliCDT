@@ -18,7 +18,7 @@
  */
 
 import type { EcsStatus, InstanceObservation, TrafficReading } from "../aliyun/api";
-import { TrafficUnavailableError, trafficBytesToDecimalGb } from "../aliyun/api";
+import { TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
 import { redact } from "../redact";
 import { decide } from "../monitor/decision";
@@ -103,7 +103,7 @@ export async function runReadOnlyQuery(deps: QueryDeps, config: QueryConfig): Pr
 
     let trafficGB: number;
     try {
-      trafficGB = trafficBytesToDecimalGb(traffic.totalBytes);
+      trafficGB = trafficBytesToGb(traffic.totalBytes);
     } catch (cause) {
       return {
         ...errorOf("cdt-query", cause instanceof Error ? cause : new Error("unusable total")),

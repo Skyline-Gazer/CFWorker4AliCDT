@@ -19,7 +19,7 @@
 
 import type { Config } from "../config";
 import type { EcsStatus, InstanceObservation, TrafficReading } from "../aliyun/api";
-import { TrafficUnavailableError, trafficBytesToDecimalGb } from "../aliyun/api";
+import { TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
 import { decide } from "./decision";
 import type { Decision, DecisionAction } from "./decision";
@@ -174,7 +174,7 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
 
   let trafficGB: number;
   try {
-    trafficGB = trafficBytesToDecimalGb(traffic.totalBytes);
+    trafficGB = trafficBytesToGb(traffic.totalBytes);
   } catch (cause) {
     // A non-finite or negative total cannot be compared against a threshold.
     return finish(deps, startedAt, base, {

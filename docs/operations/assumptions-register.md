@@ -64,21 +64,23 @@ too-large a unit stops the instance early; too-small a unit lets it run past the
 allowance. **Not inherently fail-safe**, which is why verification is required
 before scheduled authority is granted rather than afterwards.
 In the meantime: the conversion lives in exactly one named function
-(`trafficBytesToDecimalGb`), so a corrected unit is a one-line change, and the
+(`trafficBytesToGb`), using `1024^3` bytes per displayed GB to align with CDT. The
 figure is recorded in D1 and, when webhook reporting is configured, in the webhook
 payload so a wrong unit is auditable after the fact (PLAN R4).
 
-### A4 — The threshold unit is **decimal** GB (`10^9` bytes)
-Evidence: **owner decision**, not an external fact. Recorded because it is a
-deliberate divergence: the originating script and both reference implementations
-divide by `1024^3`, so this project stops the instance **earlier** for the same
-byte count. 180 GB decimal equals 167.6 GiB.
-How to verify: not applicable — this is intent, and the tests pin the divisor and
-assert it is *not* `1024^3`.
-If wrong: nothing breaks technically; an operator migrating from the prior script
-would see enforcement trip earlier than expected.
-In the meantime: documented prominently in the README and here, never silently
-inherited (PLAN R5).
+### A4 — Displayed GB uses the CDT console's `1024^3` divisor
+Evidence: **owner-provided live comparison**. The raw CDT quantity is `27,858,630`
+bytes; the previous Worker displayed `0.02785863`, while the CDT console displayed
+`0.02595 GB`. Dividing the byte quantity by `1024^3` gives approximately
+`0.02594537`, matching the console. The public label remains `GB` for operator and
+console alignment; this is not SI decimal GB (`10^9` bytes).
+How to verify: the `trafficBytesToGb` tests pin the live example, the `1024^3`
+divisor, and exact conversion at the configured threshold. At first deployment,
+compare the returned `trafficGB` to CDT for the same period using this divisor.
+If wrong: the Worker and console would show different values and threshold
+enforcement would occur at a different traffic amount than the operator expects.
+In the meantime: keep the default `TRAFFIC_THRESHOLD_GB` at `180`; do not change
+the threshold number to compensate for the conversion (PLAN R5).
 
 ### A5 — Summation scope: every `TrafficDetails` entry is summed
 Evidence: **empirically unconfirmed.** No official source defines the semantics.
@@ -250,10 +252,11 @@ is a separate owner action that restores `*/10 * * * *`.
    dispatched no webhook.
 4. **Confirm the endpoint (A1).** The query succeeded. A `stage: "cdt-query"` error
    means the endpoint or the signature method is wrong (A2), not that traffic is zero.
-5. **Confirm the unit (A3).** Compare the `trafficGB` in the response against the
-   Alibaba console figure for the same period. A mismatch of roughly 7% suggests a
-   decimal/binary confusion (A4); a mismatch of orders of magnitude suggests the
-   unit is not bytes.
+5. **Confirm the unit (A3/A4).** Compare the `trafficGB` in the response against
+   the Alibaba console figure for the same period. It is calculated as
+   `trafficBytes / 1024^3`; the owner-provided `27,858,630`-byte example should be
+   approximately `0.02594537 GB`, matching the console's `0.02595 GB`. A mismatch
+   suggests the raw Traffic unit, period, or calculation needs investigation.
 6. **Confirm the summation scope (A5).** Compare `trafficGB` against the console
    total for the intended regions, and inspect the per-region breakdown.
 7. **Confirm the observed state.** Verify `ecsStatus` matches the console for the

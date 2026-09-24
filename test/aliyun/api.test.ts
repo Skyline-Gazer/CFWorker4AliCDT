@@ -7,7 +7,7 @@ import {
   reduceTraffic,
   startInstance,
   stopInstance,
-  trafficBytesToDecimalGb,
+  trafficBytesToGb,
   TrafficUnavailableError,
 } from "../../src/aliyun/api";
 import type { ApiContext } from "../../src/aliyun/api";
@@ -172,56 +172,52 @@ describe("reduceTraffic", () => {
   });
 });
 
-describe("trafficBytesToDecimalGb", () => {
-  // The threshold is expressed in decimal GB (10^9 bytes), a deliberate
-  // divergence from the 1024^3 GiB used by the prior script and both reference
-  // implementations (PLAN R5, SPEC §3). These tests pin the decimal divisor and
-  // the exact boundary behaviour.
-
-  it("converts exact decimal-GB multiples", () => {
-    expect(trafficBytesToDecimalGb(1_000_000_000)).toBe(1);
-    expect(trafficBytesToDecimalGb(180_000_000_000)).toBe(180);
-    expect(trafficBytesToDecimalGb(0)).toBe(0);
+describe("trafficBytesToGb", () => {
+  it("converts exact console-GB multiples using the 1024^3 divisor", () => {
+    expect(trafficBytesToGb(1024 ** 3)).toBe(1);
+    expect(trafficBytesToGb(180 * 1024 ** 3)).toBe(180);
+    expect(trafficBytesToGb(0)).toBe(0);
   });
 
-  it("divides by 1e9, never by 1024^3", () => {
-    // A GiB divisor would yield ~0.931 for exactly 1e9 bytes. Asserting the
-    // decimal result makes a silent switch to 1024^3 fail here.
-    expect(trafficBytesToDecimalGb(1_000_000_000)).toBe(1);
-    expect(trafficBytesToDecimalGb(1_000_000_000)).not.toBeCloseTo(1_000_000_000 / 1024 ** 3, 5);
-    expect(trafficBytesToDecimalGb(107_374_182_400)).not.toBe(100);
+  it("matches the live Alibaba CDT console evidence", () => {
+    const trafficGB = trafficBytesToGb(27_858_630);
+    expect(trafficGB).toBeCloseTo(0.02594537, 7);
+    expect(trafficGB).toBeCloseTo(0.02595, 5);
+  });
+
+  it("does not use the SI decimal 1e9-byte divisor", () => {
+    expect(trafficBytesToGb(1_000_000_000)).not.toBe(1);
+    expect(trafficBytesToGb(1_000_000_000)).toBeCloseTo(1_000_000_000 / 1024 ** 3, 12);
   });
 
   it("is exact at the threshold boundary inputs chosen by the decision tests", () => {
-    // The boundary values used by the P4 action matrix must be exact in binary
-    // floating point so threshold tests assert real behaviour, not FP noise.
     for (const gb of [0, 1, 2, 100, 180]) {
-      expect(trafficBytesToDecimalGb(gb * 1_000_000_000)).toBe(gb);
+      expect(trafficBytesToGb(gb * 1024 ** 3)).toBe(gb);
     }
   });
 
   it("converts a partial gigabyte proportionally", () => {
-    expect(trafficBytesToDecimalGb(500_000_000)).toBe(0.5);
-    expect(trafficBytesToDecimalGb(1)).toBe(1e-9);
+    expect(trafficBytesToGb(1024 ** 3 / 2)).toBe(0.5);
+    expect(trafficBytesToGb(1)).toBe(1 / 1024 ** 3);
   });
 
   it("rejects value that is not a finite non-negative number", () => {
     for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
-      expect(() => trafficBytesToDecimalGb(bad)).toThrow(TrafficUnavailableError);
+      expect(() => trafficBytesToGb(bad)).toThrow(TrafficUnavailableError);
     }
   });
 });
 
 describe("TrafficReading — unit conversion (SPEC §3)", () => {
-  it("exposes the reading in decimal GB alongside bytes", () => {
-    const reading = reduceTraffic({ TrafficDetails: [{ Traffic: 180_000_000_000 }] });
-    expect(reading.totalBytes).toBe(180_000_000_000);
-    expect(trafficBytesToDecimalGb(reading.totalBytes)).toBe(180);
+  it("exposes the reading in console-aligned GB alongside bytes", () => {
+    const reading = reduceTraffic({ TrafficDetails: [{ Traffic: 180 * 1024 ** 3 }] });
+    expect(reading.totalBytes).toBe(180 * 1024 ** 3);
+    expect(trafficBytesToGb(reading.totalBytes)).toBe(180);
   });
 
   it("keeps summation in integer space: no per-entry rounding to GB", () => {
-    // Three × 333_333_333 bytes = 999_999_999 bytes ≈ 0.999999999 GB. Converting
-    // per entry then summing would drift; summing bytes then converting does not.
+    // Three × 333_333_333 bytes = 999_999_999 bytes. Converting per entry then
+    // summing would drift; summing bytes then converting does not.
     const reading = reduceTraffic({
       TrafficDetails: [
         { Traffic: 333_333_333 },
@@ -230,7 +226,7 @@ describe("TrafficReading — unit conversion (SPEC §3)", () => {
       ],
     });
     expect(reading.totalBytes).toBe(999_999_999);
-    expect(trafficBytesToDecimalGb(reading.totalBytes)).toBeCloseTo(0.999999999, 9);
+    expect(trafficBytesToGb(reading.totalBytes)).toBeCloseTo(999_999_999 / 1024 ** 3, 12);
   });
 
   it("never converts unknown traffic to zero", () => {
