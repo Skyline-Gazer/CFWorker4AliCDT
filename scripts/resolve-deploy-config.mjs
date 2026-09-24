@@ -218,6 +218,15 @@ function injectApplicationVars(config) {
 }
 
 /**
+ * The owner-selected deployment plan is Workers Free, whose CPU allowance is
+ * applied by the platform. The live deploy failed with Cloudflare error 100328
+ * when a custom CPU limit was present, so no Free artifact may carry `limits`.
+ */
+function applyFreePlanConstraints(config) {
+  delete config.limits;
+}
+
+/**
  * Apply the PRE-FLIGHT differences.
  *
  * Cron is disabled with an **empty array**, not by omitting the field. Cloudflare
@@ -312,6 +321,7 @@ injectDatabaseId(binding);
 // Application configuration is injected for BOTH modes, from this one boundary,
 // so a mode can never silently change what the Worker is configured to do.
 injectApplicationVars(config);
+applyFreePlanConstraints(config);
 
 if (mode === "preflight") {
   applyPreflight(config);

@@ -124,6 +124,12 @@ function varsOf(path: string): Record<string, unknown> {
   return (readGenerated(path).vars ?? {}) as Record<string, unknown>;
 }
 
+describe("Workers Free CPU configuration", () => {
+  it("keeps the committed source config free of custom CPU limits", () => {
+    expect(readGenerated(SOURCE_CONFIG).limits).toBeUndefined();
+  });
+});
+
 /** The mode-specific arguments for a release, plus the required runtime vars. */
 function releaseEnv(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -146,6 +152,16 @@ afterAll(() => {
 });
 
 describe("PRE-FLIGHT generation", () => {
+  it("omits custom CPU limits on Workers Free", () => {
+    // Regression for live Cloudflare error 100328: custom CPU limits are unsupported on Free.
+    const { path } = generate(
+      "preflight",
+      { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS },
+      "preflight-cpu-limit",
+    );
+    expect(readGenerated(path).limits).toBeUndefined();
+  });
+
   it("writes the generated config to the repository root by default", () => {
     const path = join(REPO_ROOT, "wrangler.preflight.jsonc");
     const result = resolve("preflight", { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS });
@@ -264,6 +280,11 @@ describe("PRE-FLIGHT generation", () => {
 });
 
 describe("RELEASE generation — Cron authority", () => {
+  it("omits custom CPU limits on Workers Free", () => {
+    const { path } = generate("release", releaseEnv(), "release-cpu-limit");
+    expect(readGenerated(path).limits).toBeUndefined();
+  });
+
   it("restores the authoritative production Cron expression", () => {
     const { path } = generate("release", releaseEnv(), "release-cron");
     const triggers = readGenerated(path).triggers as { crons?: unknown };

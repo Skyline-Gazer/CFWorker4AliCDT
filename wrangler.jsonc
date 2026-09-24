@@ -15,12 +15,8 @@
     "crons": ["*/10 * * * *"],
   },
 
-  // SPEC §11: bound a single invocation. The Free plan enforces 10ms of CPU
-  // per Cron invocation; see docs/operations/ for the measured figure and the
-  // required plan.
-  "limits": {
-    "cpu_ms": 10000,
-  },
+  // The Workers Free platform CPU allowance applies automatically. Custom
+  // limits.cpu_ms is unsupported on Free; see docs/operations/deployment.md §7.
 
   // Deployment fails loudly if any of these is missing, rather than failing at
   // the first scheduled run (SPEC §2.1). Never put values here.

@@ -34,7 +34,7 @@ that can only be closed by real runtime observation are marked
 | **R5** — Decimal GB divergence | **MITIGATED** | `test/aliyun/api.test.ts` pins the divisor and asserts the result is **not** `1024^3`. Documented prominently in `README.md` and the assumptions register. | An operator migrating from the prior script sees earlier enforcement; this is intended and documented. | — |
 | **R6** — Asynchronous ECS operations | **MITIGATED** | Exactly one immediate follow-up describe, no polling. `test/monitor/execute.test.ts` asserts one follow-up and that a transitional result (`starting`) is preserved as observed. | None. | — |
 | **R7** — `StoppedMode` silently ignored | **MITIGATED** | `ForceStop` pinned `"false"` at one call site (`src/aliyun/api.ts`); mode reported as **requested**, never applied. `test/aliyun/api.test.ts` asserts the result is `{ requested: true }` and not `{ applied: true }`; `test/monitor/execute.test.ts` asserts what is sent equals what is recorded. | Billing behaviour still depends on instance support, which is not observable. No logic branches on it. | — |
-| **R8** — Cron CPU limit / Workers plan | **OPEN — BLOCKED_BY_LIVE_DEPLOYMENT** | No measurement exists. `docs/operations/deployment.md` §7 states the requirement as **pending** and gives the derivation (`cpuTime` from Workers observability). Retries are bounded; no long-polling. | A run exceeding 10 ms may be terminated mid-flight. It aborts **safely** (no mutation) but reports nothing. | **#28** |
+| **R8** — Free platform CPU allowance / Workers plan | **OPEN — BLOCKED_BY_LIVE_DEPLOYMENT** | No measurement exists. `docs/operations/deployment.md` §7 states Cron `cpuTime` as **pending**, explains that Free applies its allowance automatically, and gives the post-RELEASE measurement method. Retries are bounded; no long-polling. | A run exceeding the 10 ms platform allowance may be terminated mid-flight. It aborts **safely** (no mutation) but reports nothing. | **#28** |
 | **R9** — Log persistence / secret leakage | **MITIGATED** | Single redaction boundary (`src/redact.ts`), consumed by rpc, webhook, storage, dashboard, query, router. `test/redaction-surfaces.test.ts` asserts the same credential cannot escape **any** of the four destinations via real module paths, and that every module exporting `redact` exports the same function **by reference**. | None identified. | — |
 | **R10** — CI/test performing a live mutation | **MITIGATED** | CI holds no credentials and runs no deploy (`.github/workflows/ci.yml`); all network I/O is mocked; deployment is manual and gated. | None. | — |
 | **R11** — Branch protection unenforceable | **MITIGATED** | Repository is public; protection **enabled and verified**: PR required, `Format, lint, typecheck, test` required, admin enforcement on, force-push and deletion blocked. All four acceptance behaviours were demonstrated live on Issue #15 (direct push rejected `GH006`; failing-CI merge refused as `BLOCKED`; passing CI merged; force-push rejected). | None. | #15 (closed) |
@@ -104,8 +104,8 @@ action.
 
 | Item | Why it is open |
 | --- | --- |
-| **#28** — measured CPU per run | Requires a deployment; the observation does not exist yet |
-| **#31** — final Cloudflare plan statement | Derives from the #28 measurement |
+| **#28** — measured CPU per run | Requires a successful RELEASE and a Cron observation; the measurement does not exist yet |
+| **#31** — final Cloudflare plan statement | Remains pending until the #28 measurement is available and the owner chooses the plan conclusion |
 | **#47** — deployment workflow, protected environment, ordered remote migration | Requires creating remote resources; owner-gated |
 | **R2, R3, R4** — endpoint, accepted signature method, traffic unit | Empirically unconfirmable without a live call |
 | **R8** — CPU budget | See #28 |
@@ -133,7 +133,8 @@ V1_RELEASE_READY=NO
    all seven variables and all five secrets.
 4. **Merge #47** and perform the first deployment.
 5. **Run the first-run verification** (assumptions register §4) and record the
-   measured `cpuTime`, which closes #28 and #31.
+   measured `cpuTime` as evidence for #28; use it for the owner-reviewed plan
+   conclusion tracked by #31.
 6. Only then is `V1_RELEASE_READY` claimable.
 
 ## 8. References
