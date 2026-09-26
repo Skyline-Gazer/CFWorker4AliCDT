@@ -5,13 +5,11 @@ workflow, contact a production account, or authorize a deployment.
 
 ## Revision and source
 
-- `MAIN_SHA`: `dbbf22620db543d48a8c2fa1d5577d57b86e1e7e` — last confirmed shared
-  `main` tip, containing the merged WEB-05..08 adapters.
-- `MAIN_SHA_AFTER_WEB10_11_LANDS`: pending. WEB-10/11 changes are on
-  `feat/p7-web-10-11-decision-reason-release-packet` and have not been pushed or
-  merged. Refresh this field and `MAIN_SHA` after merge before any later owner
-  authorization.
-- Related work: Refs #87 #88. Issue #87 remains OPEN; Issue #88 remains OPEN.
+- `MAIN_SHA`: `f3c6522ce935b155c0c288fe224b2c48b21c9716` — current `main` tip after
+  WEB-10/11 squash-merge (PR #103). Includes nullable `decision_reason`,
+  aggregation audit surfaces, and this verification packet.
+- Related work: Refs #87 #88 (DoD verified post-merge; Issues closed when Project
+  Status set to Done).
 - `PRODUCTION_DEPLOYED=NO`
 - `PRE-FLIGHT_DISPATCHED=NO`
 - `RELEASE_DISPATCHED=NO`
@@ -19,7 +17,7 @@ workflow, contact a production account, or authorize a deployment.
 
 The prior production release baseline is **none**: the owner context records no
 production PRE-FLIGHT or RELEASE. Configuration deltas below are measured against
-the confirmed shared `main` SHA above, not against a production deployment.
+the post-WEB-10/11 `main` SHA above, not against a production deployment.
 
 ## Adapter inventory
 
@@ -77,9 +75,8 @@ migration.
 
 ## Owner decision gate
 
-This packet is ready for review, but its post-merge `MAIN_SHA` is pending. The owner
-decides separately whether to authorize any later PRE-FLIGHT or RELEASE after the
-changes are merged and the packet is refreshed. Until then:
+This packet is ready for owner review at the `MAIN_SHA` above. The owner decides
+separately whether to authorize any later PRE-FLIGHT or RELEASE. Until then:
 
 ```text
 PRODUCTION_DEPLOYED=NO
