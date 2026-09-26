@@ -57,12 +57,39 @@ configuration codes; no browser notification authority). The donor logs view is 
 | `save_config` | `POST ?action=save_config`, JSON config ([L1500](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1500)) | `FUTURE_BACKEND` | There is no runtime config-write path. Changes to Worker variables or Secrets require operator provisioning outside the dashboard. |
 | `send_test_email` | `POST ?action=send_test_email`, JSON `{ email }` ([L1553](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1553)) | `PLACEHOLDER` | Authenticated fail-closed. Request body credentials are ignored. Missing Worker `SMTP_HOST`/`SMTP_FROM` → HTTP 501 `SMTP_NOT_CONFIGURED`; when those are set → HTTP 501 `BACKEND_NOT_AVAILABLE` (no SMTP transport activated). Secrets stay Worker Secrets. |
 | `send_test_telegram` | `POST ?action=send_test_telegram`, JSON `{ telegram }` ([L1563](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1563)) | `PLACEHOLDER` | Authenticated fail-closed. Request body bot tokens are ignored. Missing Worker `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` → HTTP 501 `TELEGRAM_NOT_CONFIGURED`; when those are set → HTTP 501 `BACKEND_NOT_AVAILABLE` (no Telegram transport activated). Optional `TELEGRAM_PROXY_URL` is Worker-only. Secrets stay Worker Secrets. |
-| `send_test_webhook` | `POST ?action=send_test_webhook`, JSON `{ webhook }` ([L1573](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1573)) | `FUTURE_BACKEND` | Dedicated authenticated fail-closed response; request body credentials are ignored. Without configured Worker `WEBHOOK_URL`, returns HTTP 501 with `WEBHOOK_NOT_CONFIGURED`; when a URL is configured, returns HTTP 501 with `BACKEND_NOT_AVAILABLE`. Both responses report `success: false`, `available: false`, and `mutation: false`. Manual sending is not activated; the scheduled Cron webhook remains the only sender. |
+| `send_test_webhook` | `POST ?action=send_test_webhook`, JSON `{ webhook }` ([L1573](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1573)) | `PLACEHOLDER` | Dedicated authenticated fail-closed response; request body credentials are ignored. Without configured Worker `WEBHOOK_URL`, returns HTTP 501 with `WEBHOOK_NOT_CONFIGURED`; when a URL is configured, returns HTTP 501 with `BACKEND_NOT_AVAILABLE`. Both responses report `success: false`, `available: false`, and `mutation: false`. Manual sending is not activated; the scheduled Cron webhook remains the only sender. |
 | `refresh_account` | `POST ?action=refresh_account`, JSON `{ id }` ([L1203](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1203)) | `ADAPTED` | Runs the existing authenticated live query for the singleton. The donor ID is ignored; this path has no Start/Stop call or D1 write and reports `mutation: false`. |
 | `get_logs` | `GET ?action=get_logs&tab=...` ([L1510](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1510)) | `ADAPTED` | Returns up to 200 newest D1 `traffic_checks` observations as donor log entries, using only allowlisted monitoring fields and redacting stored error text. The optional tab is ignored; no separate log store is introduced. |
 | `clear_logs` | `POST ?action=clear_logs`, JSON `{ tab }` ([L1522](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1522)) | `PLACEHOLDER` | Disabled; returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. No delete route exists; D1 observational history is not cleared. |
 | `get_history` | `GET ?action=get_history&id=...` ([L1290](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1290)) | `ADAPTED` | Reads at most the newest 200 D1 rows. The 24-hour series uses actual samples; the 30-day series uses the latest known sample per UTC date. Unknown traffic and missing dates produce no chart point. The response includes up to five newest stored decision reasons; pre-migration and pre-decision rows remain `null`. The donor account ID is ignored. |
 | `logout` | `GET ?action=logout` ([L1427](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1427)) | `PLACEHOLDER` | The server action still returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. The UI can clear its page-memory Bearer token, but there is no server session and the browser may retain Basic credentials. |
+
+## FEATURE-11 parity audit (Refs #99)
+
+Audited against main tip after FEATURE-06/07/08/09 landings. Epic invariants still hold:
+Cron (`*/10 * * * *`) is the sole ECS mutation authority; Worker Secrets never return to
+the browser or D1; notification test actions stay fail-closed (no fake success).
+
+### Action coverage (donor matrix)
+
+| Classification | Actions |
+| --- | --- |
+| `ADAPTED` | `login`, `check_login`, `get_status`, `refresh_account`, `get_history`, `get_logs`, `get_config`, `get_billing` |
+| `PLACEHOLDER` (fail-closed / disabled) | `control_instance`, `clear_logs`, `logout`, `send_test_email`, `send_test_telegram`, `send_test_webhook` |
+| `FUTURE_BACKEND` (explicit unavailable) | `check_init`, `setup`, `save_config` |
+
+### Intentional gaps (not defects for this audit)
+
+- **OWNER GATE** (packets only; no production activation): #90 multi-account, #91 manual Start/Stop, #92 daily schedule, #93 keep-alive.
+- Notification **transports** for SMTP / Telegram / manual webhook test-send remain inactive (`BACKEND_NOT_AVAILABLE` when secrets present). Scheduled Cron webhook sender is unchanged.
+- `save_config` / browser secret writes remain unavailable by design.
+- Production Worker may still run an older SHA until a future owner UPDATE; this audit is about **main tip** parity docs/code, not live deploy.
+
+### Verdict
+
+Unblocked donor FEATURE parity for Milestone-1+ notification/config/billing/logs paths is
+met on main. Remaining open work is OWNER GATE (#90–#93) plus optional future transport
+activation under separate owner approval — not silent console authority.
 
 ## Classification meanings
 
