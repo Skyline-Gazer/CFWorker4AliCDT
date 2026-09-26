@@ -8,6 +8,8 @@ export default tseslint.config(
       "dist/",
       "coverage/",
       ".wrangler/",
+      // Imported donor bundles are preserved as supplied and are not app source.
+      "static/",
       // Config files are not part of the typed project.
       "eslint.config.js",
       "vitest.config.ts",

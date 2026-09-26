@@ -1,8 +1,9 @@
 /**
  * HTTP route dispatch (SPEC §8.1, §8.5).
  *
- * The surface is deliberately small and closed: four routes, one of them public
- * and inert. Two properties are structural rather than conventional.
+ * The pathname surface is deliberately small and closed: four routes, one of
+ * them public and inert. Donor query actions are handled by a separate failure
+ * facade. Two properties are structural rather than conventional.
  *
  * **No route can mutate an instance.** `RouteDeps` exposes no mutation seam at
  * all — there is no `startInstance`/`stopInstance` to call. A control route
@@ -19,6 +20,7 @@
 
 import { authenticate, basicChallenge } from "./auth";
 import type { AuthConfig } from "./auth";
+import { unsupportedDonorAction } from "./donor-actions";
 import { redact } from "../redact";
 
 /** What a handler returns: a body plus any headers to add. */
@@ -44,7 +46,7 @@ export interface RouteResult {
 }
 
 /**
- * The route table.
+ * The pathname route table.
  *
  * A path is listed here even for methods it does not support, so a known path
  * with the wrong method can be distinguished from an unknown path. That
@@ -88,11 +90,30 @@ function authorize(request: Request, config: AuthConfig): boolean {
  * raw error message can carry a bound parameter or a credential (SPEC §7.5).
  */
 export async function route(request: Request, deps: RouteDeps): Promise<RouteResult> {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
   const method = request.method.toUpperCase();
+  const hasDonorAction = url.searchParams.has("action");
 
-  // Unknown path first: it is not part of the surface at all, so no method on it
-  // can be "unsupported" — 404, never 405.
+  // Protect the full root and API namespaces before checking route existence or
+  // method. The imported donor UI sends its legacy actions as `/?action=...`;
+  // those must also authenticate before returning either a placeholder or 405.
+  const protectedPath =
+    pathname === "/" || pathname === "/api" || pathname.startsWith("/api/") || hasDonorAction;
+  if (protectedPath && !authorize(request, deps.auth)) {
+    return result(401, "Unauthorized", { "www-authenticate": basicChallenge() });
+  }
+
+  if (hasDonorAction) {
+    if (pathname !== "/") return result(404, "Not Found");
+    if (method !== "GET" && method !== "POST") {
+      return result(405, "Method Not Allowed", { allow: "GET, POST" });
+    }
+    return unsupportedDonorAction(url.searchParams.get("action") ?? "");
+  }
+
+  // After namespace authentication, an unknown path is not part of the surface,
+  // so no method on it can be "unsupported" — 404, never 405.
   if (!isKnownPath(pathname)) {
     return result(404, "Not Found");
   }
@@ -105,7 +126,7 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
 
   // Authentication before any work. A protected route must not reach its handler
   // with bad credentials, so nothing is invoked below this point until it passes.
-  if (!PUBLIC_PATHS.includes(pathname) && !authorize(request, deps.auth)) {
+  if (!protectedPath && !PUBLIC_PATHS.includes(pathname) && !authorize(request, deps.auth)) {
     return result(401, "Unauthorized", { "www-authenticate": basicChallenge() });
   }
 
@@ -138,7 +159,10 @@ async function dispatch(pathname: string, deps: RouteDeps): Promise<RouteResult>
 
   if (pathname === "/") {
     const output = await deps.dashboard();
-    return result(200, output.body, { "content-type": "text/html; charset=utf-8" });
+    return result(200, output.body, {
+      "content-type": "text/html; charset=utf-8",
+      ...output.headers,
+    });
   }
 
   if (pathname === "/api/history") {

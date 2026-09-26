@@ -37,6 +37,7 @@ import type { HistoryRow } from "./storage/read";
 import { route } from "./web/router";
 import { renderDashboard } from "./web/dashboard";
 import { runReadOnlyQuery } from "./web/query";
+import { authenticate, basicChallenge } from "./web/auth";
 import type { AuthConfig } from "./web/auth";
 import { redact } from "./redact";
 
@@ -56,6 +57,7 @@ export interface Env {
   readonly ADMIN_USER?: string;
   readonly ADMIN_TOKEN?: string;
   readonly TRAFFIC_DB?: D1Database;
+  readonly ASSETS?: { fetch(request: Request): Promise<Response> };
 }
 
 export interface HealthResponse {
@@ -68,6 +70,41 @@ export const healthResponse: HealthResponse = {
   status: "ok",
   service: "cfworker4alicdt",
 };
+
+/** Public immutable files needed to render the authenticated console. */
+const PUBLIC_STATIC_ASSETS = new Set([
+  "/tailwind-compiled.css",
+  "/vue.global.prod.js",
+  "/echarts.min.js",
+  "/icon.png",
+  "/input.css",
+]);
+
+function isPublicStaticAssetRequest(request: Request, url: URL): boolean {
+  return (
+    (request.method === "GET" || request.method === "HEAD") &&
+    !url.searchParams.has("action") &&
+    PUBLIC_STATIC_ASSETS.has(url.pathname)
+  );
+}
+
+function isReservedWorkerPath(url: URL): boolean {
+  return (
+    url.pathname === "/" ||
+    url.pathname === "/api" ||
+    url.pathname.startsWith("/api/") ||
+    url.pathname === "/health" ||
+    url.pathname.startsWith("/health/") ||
+    url.searchParams.has("action")
+  );
+}
+
+function unauthorizedResponse(): Response {
+  return new Response("Unauthorized", {
+    status: 401,
+    headers: { "www-authenticate": basicChallenge() },
+  });
+}
 
 /** A config-error report may only use a usable HTTPS endpoint. */
 function isUsableWebhookUrl(value: string | undefined): value is string {
@@ -221,17 +258,50 @@ export default {
   },
 
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
     const auth: AuthConfig = {
       adminUser: env.ADMIN_USER ?? "admin",
       adminToken: env.ADMIN_TOKEN,
     };
 
+    // The only files served without auth are the donor's static bundles and
+    // favicon. The HTML document and SPA fallback remain behind ADMIN_TOKEN.
+    if (env.ASSETS !== undefined && isPublicStaticAssetRequest(request, url)) {
+      return env.ASSETS.fetch(request);
+    }
+
     const result = await route(request, {
       auth,
-      dashboard: () => ({ body: renderDashboard({ latest: undefined, history: [] }) }),
+      dashboard: async () => {
+        if (env.ASSETS === undefined) {
+          return { body: renderDashboard({ latest: undefined, history: [] }) };
+        }
+        const response = await env.ASSETS.fetch(request);
+        const headers: Record<string, string> = {};
+        response.headers.forEach((value, name) => {
+          headers[name] = value;
+        });
+        return { body: await response.text(), headers };
+      },
       history: async () => readHistoryFor(env, request),
       query: async () => readOnlyQuery(env),
     });
+
+    // Workers Static Assets is configured for SPA fallback, but Worker-first
+    // requests reach it only after the protected API and reserved paths have
+    // been resolved. Unknown page paths that would resolve to index.html are
+    // therefore authenticated before calling the asset binding.
+    if (
+      env.ASSETS !== undefined &&
+      !isReservedWorkerPath(url) &&
+      !PUBLIC_STATIC_ASSETS.has(url.pathname) &&
+      (request.method === "GET" || request.method === "HEAD")
+    ) {
+      if (!authenticate(request.headers.get("authorization"), auth).ok) {
+        return unauthorizedResponse();
+      }
+      return env.ASSETS.fetch(request);
+    }
 
     return new Response(result.body, { status: result.status, headers: result.headers });
   },

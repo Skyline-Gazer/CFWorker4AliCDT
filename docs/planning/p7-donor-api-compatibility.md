@@ -4,10 +4,12 @@ This inventory maps the actual `fetch('?action=...')` calls in the donor's
 [`static/index.html` at the pinned commit](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html)
 to the current CFWorker4AliCDT HTTP and storage contracts. The call locations
 are from the supplied `donor-index.html` inventory snapshot; an omitted method
-means the donor uses `fetch`'s default `GET` method.
+means the donor uses `fetch`'s default `GET` method. The matrix records each
+call's current placeholder response until its assigned adapter work is complete.
 
-This is a documentation inventory for Refs #78 #80. It does not add action
-routes, adapters, or runtime behavior.
+This inventory was first recorded for Refs #78 #80. Runtime compatibility now
+adds an authenticated placeholder facade; it does not implement the donor's
+backend capabilities.
 
 ## Current CFWorker4AliCDT surface
 
@@ -15,17 +17,21 @@ routes, adapters, or runtime behavior.
 | --- | --- |
 | Authentication | Protected routes accept Basic or Bearer credentials checked against Worker Secret `ADMIN_TOKEN`; the Basic username defaults to `admin`. There is no JSON password login or server session. |
 | `GET /health` | Public liveness response only; it does not disclose configuration. |
-| `GET /` | Authenticated server-rendered dashboard. Query parameters do not dispatch donor actions, so `GET /?action=...` returns dashboard HTML after authentication. |
+| `GET /` | Authenticated donor dashboard served from Workers Static Assets. |
+| `GET` or `POST /?action=...` | Authenticated compatibility facade returning HTTP 501 JSON with `success: false`, `available: false`, and `mutation: false`. It does not dispatch ECS, D1, config, or notification work. |
 | `GET /api/history` | Authenticated, bounded, newest-first monitoring rows from D1 `traffic_checks`; maximum 200 rows. |
 | `POST /api/query` | Authenticated live query of traffic and the one configured ECS instance. It is read-only and returns `mutation: false`. |
 | ECS mutation | Cron is the only ECS mutation authority. No HTTP route can start, stop, or reboot an instance. |
 | Configuration | Runtime configuration comes from Worker variables and Secrets; there is no browser config read/write API. Secret values are not exposed to the dashboard. |
 | D1 | `traffic_checks` stores observational run history. It is not an account store, platform log store, or runtime configuration store. |
 
-The donor uses the root path plus a query action, while this Worker routes by
-pathname and method. Donor `POST /?action=...` calls therefore receive `405`
-for `/`; they do not invoke an action handler. No donor action endpoint is
-implemented verbatim, so no row is classified `SUPPORTED_NOW`.
+The donor uses the root path plus a query action. Those calls now reach the
+authenticated facade rather than dashboard HTML or a method collision. No
+donor capability is implemented verbatim, so no row is classified
+`SUPPORTED_NOW`. `control_instance`, `clear_logs`, and `logout` return
+`FEATURE_NOT_IMPLEMENTED`; the other actions report `ADAPTER_REQUIRED` or
+`BACKEND_NOT_AVAILABLE` as applicable. WEB-05 through WEB-08 remain open for
+authentication and data adapters.
 
 ## Action matrix
 
@@ -36,7 +42,7 @@ implemented verbatim, so no row is classified `SUPPORTED_NOW`.
 | `login` | `POST ?action=login`, JSON `{ password }` ([L1440](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1440)) | `ADAPTER_REQUIRED` | Replace the donor password/session request with the current Basic or Bearer `Authorization` flow using `ADMIN_TOKEN`; no JSON login route exists. |
 | `check_login` | `GET ?action=check_login` ([L1159](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1159)) | `ADAPTER_REQUIRED` | Use successful access to a protected current route and handle its `401` challenge. There is no `logged_in` JSON response or session endpoint. |
 | `get_status` | `GET ?action=get_status` ([L1177](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1177)) | `ADAPTER_REQUIRED` | Use the dashboard or adapt `POST /api/query`. The current query reports the configured singleton and its read-only decision, not the donor's `data[]` account collection. |
-| `control_instance` | `POST ?action=control_instance`, JSON `{ id, action }` ([L1230](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1230)) | `PLACEHOLDER` | **Disabled; zero mutation.** There is no HTTP control route. Any imported UI control must remain an explicit `FEATURE_NOT_IMPLEMENTED` placeholder and must not call ECS. Cron remains the only mutation authority. |
+| `control_instance` | `POST ?action=control_instance`, JSON `{ id, action }` ([L1230](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1230)) | `PLACEHOLDER` | **Disabled; zero mutation.** Returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`; the handler does not read the body or call ECS. Cron remains the only mutation authority. |
 | `get_config` | `GET ?action=get_config` ([L1461](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1461)) | `FUTURE_BACKEND` | There is no config API. Worker Secrets and variables are not returned to browser code. |
 | `save_config` | `POST ?action=save_config`, JSON config ([L1500](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1500)) | `FUTURE_BACKEND` | There is no runtime config-write path. Changes to Worker variables or Secrets require operator provisioning outside the dashboard. |
 | `send_test_email` | `POST ?action=send_test_email`, JSON `{ email }` ([L1553](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1553)) | `FUTURE_BACKEND` | No email sender or test-notification endpoint exists. |
@@ -44,9 +50,9 @@ implemented verbatim, so no row is classified `SUPPORTED_NOW`.
 | `send_test_webhook` | `POST ?action=send_test_webhook`, JSON `{ webhook }` ([L1573](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1573)) | `FUTURE_BACKEND` | The optional Worker webhook sends scheduled run reports only. There is no manual test endpoint, and webhook credentials must not be sent from browser code. |
 | `refresh_account` | `POST ?action=refresh_account`, JSON `{ id }` ([L1203](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1203)) | `ADAPTER_REQUIRED` | Adapt to `POST /api/query` for a live, read-only refresh of the one configured instance. The current API does not select donor account IDs and reports `mutation: false`. |
 | `get_logs` | `GET ?action=get_logs&tab=...` ([L1510](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1510)) | `FUTURE_BACKEND` | There is no app log endpoint or action/heartbeat log store. D1 monitoring history is available separately through `GET /api/history`. |
-| `clear_logs` | `POST ?action=clear_logs`, JSON `{ tab }` ([L1522](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1522)) | `PLACEHOLDER` | Disabled. No delete route exists; D1 `traffic_checks` is observational history retained indefinitely and must not be cleared by the donor control. |
+| `clear_logs` | `POST ?action=clear_logs`, JSON `{ tab }` ([L1522](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1522)) | `PLACEHOLDER` | Disabled; returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. No delete route exists; D1 observational history is not cleared. |
 | `get_history` | `GET ?action=get_history&id=...` ([L1290](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1290)) | `ADAPTER_REQUIRED` | Adapt `GET /api/history` rows to a run-history view. The donor's account-ID lookup and 24-hour/30-day chart series are not present; the current endpoint returns at most 200 run rows and has no per-account grouping. |
-| `logout` | `GET ?action=logout` ([L1427](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1427)) | `PLACEHOLDER` | There is no server session or logout route, and Basic credentials cannot be revoked by a request. Do not represent local UI state clearing as server-side logout. |
+| `logout` | `GET ?action=logout` ([L1427](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1427)) | `PLACEHOLDER` | Returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. There is no server session, and Basic credentials cannot be revoked by a request. |
 
 ## Classification meanings
 

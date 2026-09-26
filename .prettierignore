@@ -4,3 +4,5 @@ dist/
 .wrangler/
 package-lock.json
 docs/
+# Imported donor HTML and compiled bundles stay in their pinned source format.
+static/

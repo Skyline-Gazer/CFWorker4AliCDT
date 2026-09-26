@@ -38,21 +38,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Planned derived static assets
+## Derived static assets
 
-The following files are inventoried from the donor's `static/` directory for
-provenance tracking. **They are not copied into this repository by this docs
-change.**
+The following files are copied from the donor's `static/` directory at the
+pinned commit above. The HTML and styles remain substantially as supplied;
+only the product label and unsupported-feature/security feedback hooks were
+adapted.
 
-| Donor file                     | Role                                              | Notice handling                                             |
-| ------------------------------ | ------------------------------------------------- | ----------------------------------------------------------- |
-| `static/index.html`            | Donor dashboard markup and client code.           | Retain applicable source notices.                           |
-| `static/tailwind-compiled.css` | Compiled Tailwind CSS v4 stylesheet.              | Preserve embedded Tailwind/CSS license headers when copied. |
-| `static/vue.global.prod.js`    | Vue global production bundle.                     | Preserve the embedded Vue license header when copied.       |
-| `static/echarts.min.js`        | ECharts browser bundle used by the history chart. | Preserve the embedded ECharts license header when copied.   |
-| `static/icon.png`              | Donor favicon.                                    | Retain donor attribution or metadata if present.            |
-| `static/input.css`             | Tailwind CSS source stylesheet.                   | Retain applicable source notices.                           |
+| Donor file                     | Role                                              | Notice handling                               |
+| ------------------------------ | ------------------------------------------------- | --------------------------------------------- |
+| `static/index.html`            | Donor dashboard markup and client code.           | Retain applicable source notices.             |
+| `static/tailwind-compiled.css` | Compiled Tailwind CSS v4 stylesheet.              | Embedded Tailwind MIT header retained.        |
+| `static/vue.global.prod.js`    | Vue global production bundle.                     | Embedded Vue MIT header retained.             |
+| `static/echarts.min.js`        | ECharts browser bundle used by the history chart. | Embedded Apache and bundled notices retained. |
+| `static/icon.png`              | Donor favicon.                                    | Copied unchanged from the donor pin.          |
+| `static/input.css`             | Tailwind CSS source stylesheet.                   | Copied unchanged from the donor pin.          |
 
-The Vue, ECharts, and Tailwind embedded headers will be preserved when their
-assets are copied. This upstream MIT notice does not replace third-party notices
-or license terms carried by those bundled assets.
+This upstream MIT notice does not replace third-party notices or license terms
+carried by the bundled assets.
