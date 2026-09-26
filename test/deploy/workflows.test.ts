@@ -12,12 +12,11 @@ import { describe, expect, it } from "vitest";
  * guarantees the design depends on, so a deletion or a quiet edit is caught
  * rather than discovered during the first real deployment.
  *
- * The two-stage deployment model exists because Cron is the only ECS mutation
+ * The initial two-stage deployment exists because Cron is the only ECS mutation
  * authority. Enabling it before the traffic unit has been verified against the
- * console could produce a *valid but wrong* threshold decision, which is not a
- * failure mode the fail-closed design can catch. So the workflows are split:
- * PRE-FLIGHT creates the Worker with Cron explicitly disabled, and RELEASE — a
- * separate, explicitly authorized dispatch — is the only path that enables it.
+ * console could produce a *valid but wrong* threshold decision. PRE-FLIGHT
+ * creates a new Worker with Cron disabled; RELEASE is the first-enable path;
+ * UPDATE preserves the known production schedule on an existing Worker.
  */
 
 const WORKFLOWS_DIR = join(import.meta.dirname, "..", "..", ".github", "workflows");
@@ -74,11 +73,13 @@ function environmentName(job: Job): string | undefined {
 
 const PREFLIGHT = readWorkflow("preflight.yml");
 const RELEASE = readWorkflow("release.yml");
+const UPDATE = readWorkflow("update.yml");
 
 describe("workflow dispatch and PR isolation", () => {
   for (const [label, workflow] of [
     ["preflight.yml", PREFLIGHT],
     ["release.yml", RELEASE],
+    ["update.yml", UPDATE],
   ] as const) {
     it(`${label} is workflow_dispatch only`, () => {
       const triggers = Object.keys(workflow.on ?? {});
@@ -108,6 +109,12 @@ describe("workflow dispatch and PR isolation", () => {
     expect(RELEASE.name).toContain("Release");
   });
 
+  it("UPDATE is distinct and has its own concurrency group", () => {
+    expect(UPDATE.name).toContain("Update");
+    expect(UPDATE.name).not.toBe(RELEASE.name);
+    expect(UPDATE.concurrency?.group).not.toBe(RELEASE.concurrency?.group);
+  });
+
   it("PR CI cannot reach deployment secrets", () => {
     // The PR workflow holds no credentials, so it is structurally incapable of
     // mutating a live account.
@@ -123,6 +130,7 @@ describe("deployment trust boundary", () => {
   for (const [label, workflow] of [
     ["preflight.yml", PREFLIGHT],
     ["release.yml", RELEASE],
+    ["update.yml", UPDATE],
   ] as const) {
     it(`${label} targets the production Environment`, () => {
       const jobs = Object.values(workflow.jobs ?? {});
@@ -195,11 +203,12 @@ describe("PRE-FLIGHT cannot enable Cron", () => {
 
   it("does not attach a Cron trigger through a Wrangler CLI flag", () => {
     // `wrangler deploy --triggers` would attach a schedule from the command line,
-    // bypassing the generated config entirely. Cron authority must come only from
-    // the release config, so no stage passes these flags.
+    // bypassing the generated config entirely. RELEASE and UPDATE declare Cron in
+    // their mode-specific configs, so no stage passes these flags.
     for (const [label, workflow] of [
       ["preflight.yml", PREFLIGHT],
       ["release.yml", RELEASE],
+      ["update.yml", UPDATE],
     ] as const) {
       const runs = allRuns(workflow).join("\n");
       expect(runs, label).not.toMatch(/--triggers|--schedule|--schedules/);
@@ -360,8 +369,8 @@ describe("RELEASE carries the required gates", () => {
 
   it("passes the same application runtime variables as preflight", () => {
     // Mode-specific properties may differ; the runtime application configuration
-    // must not. Both workflows must draw it from the one resolver boundary.
-    for (const workflow of [PREFLIGHT, RELEASE]) {
+    // must not. Every workflow draws it from the one resolver boundary.
+    for (const workflow of [PREFLIGHT, RELEASE, UPDATE]) {
       const resolverStep = allSteps(workflow).find((step) => (step.run ?? "").includes("resolve-"));
       expect(resolverStep?.env).toMatchObject({
         D1_DATABASE_ID: "${{ vars.D1_DATABASE_ID }}",
@@ -387,6 +396,7 @@ describe("RELEASE carries the required gates", () => {
     for (const [label, workflow] of [
       ["preflight.yml", PREFLIGHT],
       ["release.yml", RELEASE],
+      ["update.yml", UPDATE],
     ] as const) {
       for (const step of allSteps(workflow)) {
         const run = step.run ?? "";
@@ -401,10 +411,96 @@ describe("RELEASE carries the required gates", () => {
   });
 });
 
-describe("Cron authority is exclusive to RELEASE", () => {
-  it("only the release workflow resolves the release config", () => {
+describe("UPDATE is a separate existing-Worker path", () => {
+  it("requires typed update and existing-Worker confirmations without defaults", () => {
+    const dispatch = UPDATE.on?.workflow_dispatch as {
+      inputs: Record<string, Record<string, unknown>>;
+    };
+    const inputs = dispatch.inputs;
+    expect(inputs.confirmation).toMatchObject({ required: true, type: "string" });
+    expect(inputs.EXISTING_WORKER_CONFIRMED).toMatchObject({ required: true, type: "string" });
+    expect(inputs.HTTP_EXPOSURE_MODE).toMatchObject({ required: true, type: "choice" });
+    expect(inputs.HTTP_EXPOSURE_MODE?.options).toEqual(["workers_dev", "custom_domain"]);
+
+    const raw = readFileSync(join(WORKFLOWS_DIR, "update.yml"), "utf8");
+    expect(raw).not.toContain("default:");
+    expect(allSteps(UPDATE).find((step) => step.if?.includes("confirmation"))?.if).toContain(
+      "'UPDATE'",
+    );
+    expect(
+      allSteps(UPDATE).find((step) => step.if?.includes("EXISTING_WORKER_CONFIRMED"))?.if,
+    ).toContain("'YES'");
+    expect(text(UPDATE)).not.toContain("LIVE_READ_ONLY_VERIFIED");
+  });
+
+  it("resolves UPDATE and applies D1 migrations before deploying the generated artifact", () => {
+    const runs = allRuns(UPDATE);
+    const resolverIndex = runs.findIndex((run) => run.includes("--mode update"));
+    const migrateIndex = runs.findIndex((run) => run.includes("migrations apply"));
+    const deployIndex = runs.findIndex((run) => run.includes("wrangler deploy"));
+    expect(resolverIndex).toBeGreaterThanOrEqual(0);
+    expect(migrateIndex).toBeGreaterThan(resolverIndex);
+    expect(deployIndex).toBeGreaterThan(migrateIndex);
+    expect(runs[migrateIndex]).toContain("wrangler.update.jsonc");
+    expect(runs[deployIndex]).toContain("wrangler.update.jsonc");
+    expect(runs.join("\n")).not.toContain("--mode preflight");
+    expect(runs.join("\n")).not.toContain("wrangler.preflight.jsonc");
+  });
+
+  it("has no CLI Cron or route flags and loudly documents Cron preservation", () => {
+    const runs = allRuns(UPDATE).join("\n");
+    expect(runs).not.toMatch(/--triggers|--schedule|--schedules/);
+    expect(runs).not.toMatch(/--routes|--route\b|--domains|--domain\b/);
+    const raw = readFileSync(join(WORKFLOWS_DIR, "update.yml"), "utf8");
+    expect(raw).toContain("PRE-FLIGHT IS FIRST-DEPLOY ONLY");
+    expect(raw).toContain("Never run it against a live Cron Worker");
+    expect(raw).toContain("*/10 * * * *");
+    expect(raw).toContain("existing production Worker");
+  });
+
+  it("checks required Worker Secret names after deploy", () => {
+    const steps = allSteps(UPDATE);
+    const deployIndex = steps.findIndex((step) => (step.run ?? "").includes("wrangler deploy"));
+    const secretListIndex = steps.findIndex((step) =>
+      (step.run ?? "").includes(
+        "wrangler secret list --format json --config wrangler.update.jsonc",
+      ),
+    );
+    expect(secretListIndex).toBeGreaterThan(deployIndex);
+    expect(steps[secretListIndex]?.run).toContain("set -o pipefail");
+    expect(steps[secretListIndex]?.run).toContain("node scripts/assert-worker-secret-names.mjs");
+  });
+
+  it("targets production and receives runtime values as repository variables", () => {
+    const jobs = Object.values(UPDATE.jobs ?? {});
+    expect(jobs.length).toBeGreaterThan(0);
+    for (const job of jobs) expect(environmentName(job)).toBe("production");
+    const resolverStep = allSteps(UPDATE).find((step) =>
+      (step.run ?? "").includes("--mode update"),
+    );
+    expect(resolverStep?.env).toMatchObject({
+      D1_DATABASE_ID: "${{ vars.D1_DATABASE_ID }}",
+      REGION_ID: "${{ vars.REGION_ID }}",
+      ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
+      HTTP_EXPOSURE_MODE: "${{ inputs.HTTP_EXPOSURE_MODE }}",
+    });
+    for (const value of Object.values(resolverStep?.env ?? {})) {
+      expect(value).not.toContain("secrets.");
+    }
+  });
+
+  it("does not chain into PRE-FLIGHT or RELEASE", () => {
+    expect(UPDATE.on).not.toHaveProperty("workflow_run");
+    expect(UPDATE.on).not.toHaveProperty("workflow_call");
+    expect(allRuns(UPDATE).join("\n")).not.toMatch(/gh\s+workflow\s+run\s+(preflight|release)/i);
+  });
+});
+
+describe("Cron first-enable authority and UPDATE preservation", () => {
+  it("RELEASE is the first-enable path and UPDATE is the existing-Worker path", () => {
     expect(allRuns(RELEASE).join("\n")).toContain("--mode release");
     expect(allRuns(PREFLIGHT).join("\n")).not.toContain("--mode release");
+    expect(allRuns(UPDATE).join("\n")).toContain("--mode update");
   });
 
   it("the preflight config explicitly disables Cron with an empty array", () => {
@@ -415,10 +511,9 @@ describe("Cron authority is exclusive to RELEASE", () => {
     expect(raw).toMatch(/Cron/i);
   });
 
-  it("the release workflow states the Cron expression it enables", () => {
-    // The expression lives in the resolver's release mode; the workflow names it
-    // so the authority being granted is visible without reading code.
+  it("RELEASE names the first Cron enable and UPDATE names the preserved schedule", () => {
     expect(readFileSync(join(WORKFLOWS_DIR, "release.yml"), "utf8")).toContain("*/10 * * * *");
+    expect(readFileSync(join(WORKFLOWS_DIR, "update.yml"), "utf8")).toContain("*/10 * * * *");
   });
 });
 
@@ -426,6 +521,7 @@ describe("post-deploy Worker Secret presence gate", () => {
   for (const [label, workflow, config] of [
     ["PRE-FLIGHT", PREFLIGHT, "wrangler.preflight.jsonc"],
     ["RELEASE", RELEASE, "wrangler.deploy.jsonc"],
+    ["UPDATE", UPDATE, "wrangler.update.jsonc"],
   ] as const) {
     it(`${label} checks required secret names after deploy and fails through the helper`, () => {
       const steps = allSteps(workflow);

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -94,48 +94,61 @@ function generate(mode: string, label: string, extra: Record<string, string>): s
 interface DryRun {
   readonly status: number | null;
   readonly output: string;
+  readonly outdir: string;
+}
+
+interface GeneratedConfig {
+  readonly main: string;
+  readonly vars?: Record<string, string>;
+  readonly d1_databases?: { binding: string; database_id?: string }[];
+  readonly [key: string]: unknown;
 }
 
 /** Parse the JSONC the resolver emits, using an independent stripper. */
-function readGenerated(path: string): { vars?: Record<string, string> } {
+function readGenerated(path: string): GeneratedConfig {
   const stripped = readFileSync(path, "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/,(\s*[}\]])/g, "$1");
-  return JSON.parse(stripped) as { vars?: Record<string, string> };
+  return JSON.parse(stripped) as GeneratedConfig;
 }
 
 /** Run `wrangler deploy --dry-run` against one exact generated config file. */
 function dryRun(configFile: string): DryRun {
+  const outdir = join(LOG_DIR, "out");
+  rmSync(outdir, { recursive: true, force: true });
   const result = spawnSync(
     process.execPath,
-    [WRANGLER_BIN, "deploy", "--dry-run", "--config", configFile, "--outdir", join(LOG_DIR, "out")],
+    [WRANGLER_BIN, "deploy", "--dry-run", "--config", configFile, "--outdir", outdir],
     {
       cwd: REPO_ROOT,
       encoding: "utf8",
       env: resolverEnv({ WRANGLER_LOG_PATH: LOG_DIR, WRANGLER_SEND_METRICS: "false" }),
     },
   );
-  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+  return { status: result.status, output: `${result.stdout}${result.stderr}`, outdir };
 }
 
 /** The assertions shared by every generated artefact. */
 function expectWranglerAccepts(generatedPath: string): void {
   const run = dryRun(generatedPath);
-  // Include the config in the failure message: when this breaks, the config is
-  // what a reader needs to see.
+  // Check the emitted bundle as well as the process result. Wrangler's console
+  // output varies between TTY and CI streams, while the build artifact proves it
+  // resolved the entry point and compiled the exact generated config.
   const body = `${run.output}\n--- generated config ---\n${readFileSync(generatedPath, "utf8")}`;
 
   expect(run.status, body).toBe(0);
-  // 3. Config schema: Wrangler reports no error of its own.
-  expect(run.output, body).not.toContain("✘");
-  expect(run.output, body).not.toContain("ERROR");
-  // 1. Entry point resolved: it bundles the Worker rather than failing to find it.
-  expect(run.output, body).toContain("Total Upload");
-  expect(run.output, body).not.toContain("entry-point file");
-  // 2. Binding resolved and named, which only happens after config validation.
-  expect(run.output, body).toContain("env.TRAFFIC_DB");
-  expect(run.output, body).toContain("D1 Database");
+  const bundle = join(run.outdir, "index.js");
+  expect(existsSync(bundle), body).toBe(true);
+  expect(readFileSync(bundle, "utf8"), body).toContain("env.TRAFFIC_DB");
+
+  const config = readGenerated(generatedPath);
+  expect(config.main).toBe("src/index.ts");
+  expect(existsSync(join(REPO_ROOT, config.main))).toBe(true);
+  const databases = config.d1_databases ?? [];
+  expect(databases.find((entry) => entry.binding === "TRAFFIC_DB")?.database_id).toBe(
+    FAKE_DATABASE_ID,
+  );
 }
 
 describe("Wrangler accepts the exact generated PRE-FLIGHT artifact", () => {
@@ -170,6 +183,22 @@ describe("Wrangler accepts the exact generated RELEASE artifact", () => {
     const path = generate("release", "release-cron", { HTTP_EXPOSURE_MODE: "workers_dev" });
     expectWranglerAccepts(path);
     expect(readFileSync(path, "utf8")).toContain('"*/10 * * * *"');
+  });
+});
+
+describe("Wrangler accepts the exact generated UPDATE artifact", () => {
+  it("accepts the workers_dev exposure mode and retained production Cron", () => {
+    const path = generate("update", "update-workers-dev", { HTTP_EXPOSURE_MODE: "workers_dev" });
+    expectWranglerAccepts(path);
+    expect(readFileSync(path, "utf8")).toContain('"*/10 * * * *"');
+  });
+
+  it("accepts the custom_domain exposure mode", () => {
+    const path = generate("update", "update-custom-domain", {
+      HTTP_EXPOSURE_MODE: "custom_domain",
+      WORKER_CUSTOM_DOMAIN: "worker.example.com",
+    });
+    expectWranglerAccepts(path);
   });
 });
 
@@ -212,6 +241,21 @@ describe("the generated artifact is sufficient for the Worker to start", () => {
 
   it("loadConfig() accepts the release vars too", () => {
     const path = generate("release", "release-loadconfig", {
+      HTTP_EXPOSURE_MODE: "workers_dev",
+    });
+    const generated = readGenerated(path);
+    const parsed = loadConfig({
+      ...(generated.vars ?? {}),
+      ALIYUN_ACCESS_KEY_ID: "fake-akid",
+      ALIYUN_ACCESS_KEY_SECRET: "fake-aksecret",
+      WEBHOOK_URL: "https://hooks.example.test/run",
+      ADMIN_TOKEN: "fake-admin-token",
+    });
+    expect(parsed.ok, parsed.ok ? "" : parsed.error.message).toBe(true);
+  });
+
+  it("loadConfig() accepts the update vars too", () => {
+    const path = generate("update", "update-loadconfig", {
       HTTP_EXPOSURE_MODE: "workers_dev",
     });
     const generated = readGenerated(path);
@@ -269,6 +313,6 @@ describe("the assertion above has teeth", () => {
     );
     const run = dryRun(broken);
     expect(run.status).not.toBe(0);
-    expect(run.output).toContain("entry-point");
+    expect(existsSync(join(run.outdir, "index.js"))).toBe(false);
   });
 });

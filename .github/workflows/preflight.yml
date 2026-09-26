@@ -30,12 +30,12 @@ name: Preflight deploy (read-only verification)
 #    performed by the owner against `POST /api/query`, which is read-only by
 #    construction (SPEC §8.5).
 #
-# 4. **This stage cannot promote itself.** Enabling the production Cron is RELEASE's
-#    job, and RELEASE is a separate, explicitly authorized dispatch. Nothing here
-#    chains into it.
+# 4. **This stage cannot promote itself.** The first production Cron enable is
+#    RELEASE's job, and RELEASE is a separate, explicitly authorized dispatch.
+#    Normal updates to an existing Worker use UPDATE. Nothing here chains into either.
 #
 # TRUST BOUNDARY
-# Both deployment workflows target the `production` GitHub Environment. It must
+# All three deployment workflows target the `production` GitHub Environment. It must
 # require an owner reviewer, allow deployments only from `main`, and hold the
 # Cloudflare deployment secrets. The workflow-level ref guard is supplementary:
 # because workflow code comes from the selected ref, the Environment's branch

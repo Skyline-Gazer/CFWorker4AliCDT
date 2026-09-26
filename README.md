@@ -4,11 +4,12 @@ A Cloudflare Worker that enforces an Alibaba Cloud CDT traffic threshold by
 starting and stopping **one** ECS instance. It is control-stateless: D1 stores
 monitoring history, but no control decision depends on that history.
 
-> **Status: pre-deployment.** No Worker has been deployed and no live Alibaba Cloud
-> call has been made. Several load-bearing facts cannot be verified without a
-> first deployment; they are recorded as assumptions in
-> [`docs/operations/assumptions-register.md`](docs/operations/assumptions-register.md)
-> rather than presented as documented behaviour.
+> **Production state:** the last production RELEASE is
+> `106f4d214a883ac9bfdf0798110f845092fbe971`. Current `main` at
+> `ad671bc1f186faf78c3f063858eedc72ee5bb1fe` is held and has not been deployed.
+> PRE-FLIGHT is for first deploys only; normal existing-Worker re-deployments use
+> the owner-gated UPDATE path documented below and in
+> [`docs/operations/deployment.md`](docs/operations/deployment.md).
 
 ## P7 Web Console donor follow-up
 
@@ -19,8 +20,10 @@ compatibility inventory; they do not revise that acceptance as a failure. The
 compatibility matrix is in
 [`docs/planning/p7-donor-api-compatibility.md`](docs/planning/p7-donor-api-compatibility.md),
 and provenance is recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-This documentation work does not copy donor static assets, add adapters, or
-dispatch production PRE-FLIGHT/RELEASE.
+Current `main` includes the static donor UI and authenticated read-only status,
+refresh, and history adapters; the donor control action remains a non-mutating
+placeholder. Refs #105 covers the existing-Worker update path and does not
+authorize a production deployment.
 
 ## Why this exists
 
@@ -90,7 +93,7 @@ and unavailable traffic are different facts, and only one of them is safe to inf
 
 ## Deployment
 
-Pre-deployment, and **two-stage** by design. The short version:
+The initial deployment is **two-stage** by design:
 
 ```
 PRE-FLIGHT  →  first deploy, Cron explicitly disabled (triggers.crons = [])
@@ -99,6 +102,14 @@ PRE-FLIGHT  →  first deploy, Cron explicitly disabled (triggers.crons = [])
             →  owner confirms
 RELEASE     →  separate, approved dispatch: stable HTTP endpoint + Cron */10 * * * *
 ```
+
+Normal production re-deployments use `.github/workflows/update.yml`. UPDATE requires
+the owner to confirm the Worker already exists with Cron live, carries Cron at
+`*/10 * * * *`, preserves the explicitly selected HTTP exposure and required Worker
+Secret names, and applies pending D1 migrations before deploying code.
+
+**Never use PRE-FLIGHT against the live Cron Worker.** Its explicit empty Cron array
+removes every Cron Trigger. PRE-FLIGHT is for a new Worker only.
 
 The split exists because enabling Cron before the traffic unit has been checked
 would let the system act on a _valid but incorrect_ threshold comparison — the one
@@ -110,16 +121,16 @@ HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`), wi
 no default; the committed config exposes no stable endpoint. Full procedure:
 [`docs/operations/deployment.md`](docs/operations/deployment.md).
 
-Required RELEASE secrets and optional notification secrets (set via
+Required production Worker secrets and optional notification secrets (set via
 `wrangler secret put`; never committed):
 
-| Secret                     | Requirement         | Notes                                                                                              |
-| -------------------------- | ------------------- | -------------------------------------------------------------------------------------------------- |
-| `ALIYUN_ACCESS_KEY_ID`     | Required            | From the least-privilege RAM user.                                                                 |
-| `ALIYUN_ACCESS_KEY_SECRET` | Required            | Its paired secret.                                                                                 |
-| `ADMIN_TOKEN`              | Required by RELEASE | Dashboard and API credential. Absent ⇒ every protected route denies.                               |
-| `WEBHOOK_URL`              | Optional            | If set, must be an absolute `https://` URL and enables one notification attempt per scheduled run. |
-| `WEBHOOK_TOKEN`            | Optional with URL   | Sent as `Authorization: Bearer <token>`. A token without `WEBHOOK_URL` is a config error.          |
+| Secret                     | Requirement                    | Notes                                                                                              |
+| -------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `ALIYUN_ACCESS_KEY_ID`     | Required                       | From the least-privilege RAM user.                                                                 |
+| `ALIYUN_ACCESS_KEY_SECRET` | Required                       | Its paired secret.                                                                                 |
+| `ADMIN_TOKEN`              | Required by RELEASE and UPDATE | Dashboard and API credential. Absent ⇒ every protected route denies.                               |
+| `WEBHOOK_URL`              | Optional                       | If set, must be an absolute `https://` URL and enables one notification attempt per scheduled run. |
+| `WEBHOOK_TOKEN`            | Optional with URL              | Sent as `Authorization: Bearer <token>`. A token without `WEBHOOK_URL` is a config error.          |
 
 The Worker runs scheduled control and records history without webhook secrets. The
 webhook is observational when enabled; its failures cannot affect ECS control.

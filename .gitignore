@@ -11,6 +11,7 @@ node_modules/
 # scripts/resolve-deploy-config.mjs).
 wrangler.deploy.jsonc
 wrangler.preflight.jsonc
+wrangler.update.jsonc
 
 # Scratch configs written at the repository root by the tests that exercise the
 # real resolver. They must be at the root because Wrangler resolves `main`
