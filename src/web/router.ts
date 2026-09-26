@@ -21,9 +21,15 @@
 
 import { authenticate, basicChallenge } from "./auth";
 import type { AuthConfig } from "./auth";
-import { adaptDonorHistory, adaptDonorStatus, unsupportedDonorAction } from "./donor-actions";
+import {
+  adaptDonorConfig,
+  adaptDonorHistory,
+  adaptDonorStatus,
+  unsupportedDonorAction,
+} from "./donor-actions";
 import { redact } from "../redact";
 import type { HistoryRow } from "../storage/read";
+import type { ConfigResult } from "../config";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -33,6 +39,8 @@ export interface HandlerOutput {
 
 export interface RouteDeps {
   readonly auth: AuthConfig;
+  /** Validated config for the authenticated donor `get_config` projection. */
+  readonly config: () => ConfigResult;
   /** `GET /` — server-rendered dashboard (SPEC §8.4). */
   readonly dashboard: () => HandlerOutput | Promise<HandlerOutput>;
   /** `GET /api/history` — bounded history (SPEC §9.5). Serialised as-is. */
@@ -71,6 +79,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_status", "GET"],
   ["refresh_account", "POST"],
   ["get_history", "GET"],
+  ["get_config", "GET"],
 ]);
 
 function isKnownPath(path: string): boolean {
@@ -176,6 +185,12 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     // The donor chart receives at most the newest 200 D1 observations.
     const rows = await deps.history(200);
     return jsonResult(200, adaptDonorHistory(rows));
+  }
+
+  if (action === "get_config") {
+    const parsed = deps.config();
+    if (!parsed.ok) return result(500, "Internal Server Error");
+    return jsonResult(200, adaptDonorConfig(parsed.config));
   }
 
   const unsupported = unsupportedDonorAction(action);
