@@ -64,6 +64,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         BUSINESS_REGION_ID: "cn-hongkong",
         SIGNATURE_VERSION: "v2",
         STOPPED_MODE: "StopCharging",
+        enable_billing: false,
         webhook_url_configured: true,
         webhook_token_configured: true,
         admin_token_configured: true,
@@ -88,6 +89,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         "REGION_ID",
         "SIGNATURE_VERSION",
         "STOPPED_MODE",
+        "enable_billing",
         "TRAFFIC_THRESHOLD_GB",
         "admin_token_configured",
         "aliyun_credentials_configured",
@@ -139,6 +141,13 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
           { businessRegionId: "cn-beijing", trafficBytes: 6.5 * 1024 ** 3, entryCount: 1 },
         ],
       },
+      billing: {
+        enabled: true,
+        monthly_cost: null,
+        balance: 17.25,
+        currency: "CNY",
+        error: null,
+      },
       mutation: false,
     });
 
@@ -155,6 +164,13 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       decision_reason:
         'traffic 12.5 GB is below threshold 20 GB; instance is already "running", so no action is required',
       traffic_summation_scope: "all TrafficDetails entries",
+      cost: {
+        enabled: true,
+        monthly_cost: null,
+        balance: 17.25,
+        currency: "CNY",
+        error: null,
+      },
       traffic_by_business_region: [
         { businessRegionId: "cn-hongkong", trafficBytes: 6 * 1024 ** 3, entryCount: 1 },
         { businessRegionId: "cn-beijing", trafficBytes: 6.5 * 1024 ** 3, entryCount: 1 },

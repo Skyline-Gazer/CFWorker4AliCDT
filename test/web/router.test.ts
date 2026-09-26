@@ -120,6 +120,7 @@ describe("route — protected routes require authentication", () => {
   const protectedRoutes: readonly (readonly [string, string])[] = [
     ["GET", "/"],
     ["GET", "/?action=get_config"],
+    ["GET", "/?action=get_billing"],
     ["GET", "/?action=get_logs"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
@@ -273,6 +274,68 @@ describe("route — dispatch with valid credentials", () => {
     expect(counts.query).toBe(1);
   });
 
+  it("serves get_billing as an authenticated read-only action", async () => {
+    const { deps } = harness({
+      billing: () => Promise.resolve({
+        enabled: true,
+        monthly_cost: null,
+        balance: 25.5,
+        currency: "CNY",
+        error: null,
+      }),
+    });
+    const result = await route(
+      request("GET", "/?action=get_billing", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: true,
+      mutation: false,
+      available: true,
+      data: {
+        enabled: true,
+        monthly_cost: null,
+        balance: 25.5,
+        currency: "CNY",
+        error: null,
+      },
+    });
+  });
+
+  it("reports disabled and failed billing distinctly", async () => {
+    const disabled = harness();
+    const disabledResult = await route(
+      request("GET", "/?action=get_billing", basic("admin", "tok123")),
+      disabled.deps,
+    );
+    expect(JSON.parse(disabledResult.body)).toMatchObject({
+      success: true,
+      available: false,
+      data: { enabled: false, balance: null, monthly_cost: null, error: null },
+    });
+
+    const failed = harness({
+      billing: () => Promise.resolve({
+        enabled: true,
+        monthly_cost: null,
+        balance: null,
+        currency: null,
+        error: "BSS billing request failed.",
+      }),
+    });
+    const failedResult = await route(
+      request("GET", "/?action=get_billing", basic("admin", "tok123")),
+      failed.deps,
+    );
+    expect(JSON.parse(failedResult.body)).toMatchObject({
+      success: false,
+      available: true,
+      error: "BSS billing request failed.",
+      data: { enabled: true, balance: null, monthly_cost: null },
+    });
+  });
+
   it("accepts a Bearer token on protected routes", async () => {
     const { deps, counts } = harness();
     const result = await route(request("GET", "/api/history", "Bearer tok123"), deps);
@@ -382,6 +445,7 @@ describe("route — dispatch with valid credentials", () => {
         BUSINESS_REGION_ID: "cn-hongkong",
         SIGNATURE_VERSION: "v2",
         STOPPED_MODE: "StopCharging",
+        enable_billing: false,
         webhook_url_configured: true,
         webhook_token_configured: true,
         admin_token_configured: true,
@@ -396,6 +460,7 @@ describe("route — dispatch with valid credentials", () => {
         "REGION_ID",
         "SIGNATURE_VERSION",
         "STOPPED_MODE",
+        "enable_billing",
         "TRAFFIC_THRESHOLD_GB",
         "admin_token_configured",
         "aliyun_credentials_configured",

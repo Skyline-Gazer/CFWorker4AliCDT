@@ -8,6 +8,7 @@
 
 import type { HistoryRow } from "../storage/read";
 import type { Config } from "../config";
+import type { DonorCostInfo } from "../aliyun/api";
 import { redact } from "../redact";
 
 /** Explicit allowlist for the authenticated donor config read response. */
@@ -22,6 +23,7 @@ export interface DonorConfigResponse {
     readonly BUSINESS_REGION_ID: string | null;
     readonly SIGNATURE_VERSION: string;
     readonly STOPPED_MODE: string;
+    readonly enable_billing: boolean;
     readonly webhook_url_configured: boolean;
     readonly webhook_token_configured: boolean;
     readonly admin_token_configured: boolean;
@@ -42,6 +44,7 @@ export function adaptDonorConfig(config: Config): DonorConfigResponse {
       BUSINESS_REGION_ID: config.businessRegionId ?? null,
       SIGNATURE_VERSION: config.signatureVersion,
       STOPPED_MODE: config.stoppedMode,
+      enable_billing: config.enableBilling,
       webhook_url_configured: config.webhookUrl !== undefined,
       webhook_token_configured: config.webhookToken !== undefined,
       admin_token_configured: config.adminToken !== undefined,
@@ -70,6 +73,27 @@ export interface DonorStatusEntry {
   readonly decision_reason: string | null;
   readonly traffic_summation_scope: string | null;
   readonly traffic_by_business_region: readonly DonorRegionTraffic[];
+  readonly cost?: DonorCostInfo;
+}
+
+export interface DonorBillingResponse {
+  readonly success: boolean;
+  readonly mutation: false;
+  readonly available: boolean;
+  readonly data: DonorCostInfo;
+  readonly error?: string;
+}
+
+export function adaptDonorBilling(cost: DonorCostInfo): DonorBillingResponse {
+  const available = cost.enabled;
+  const success = !cost.enabled || cost.error === null;
+  return {
+    success,
+    mutation: false,
+    available,
+    data: cost,
+    ...(cost.enabled && cost.error !== null ? { error: redact(cost.error) } : {}),
+  };
 }
 
 export interface DonorStatusResponse {
@@ -203,6 +227,20 @@ export function adaptDonorStatus(value: unknown): DonorStatusResponse {
   const thresholdReached = trafficGB !== null && usableThreshold ? trafficGB >= thresholdGB : null;
   const ecsStatus = donorEcsStatus(query.ecsStatus);
   const trafficAggregation = recordOf(query.trafficAggregation);
+  const rawCost = recordOf(query.billing);
+  const cost =
+    rawCost !== undefined && typeof rawCost.enabled === "boolean"
+      ? {
+          enabled: rawCost.enabled,
+          monthly_cost: finiteNonNegative(rawCost.monthly_cost) ?? null,
+          balance:
+            typeof rawCost.balance === "number" && Number.isFinite(rawCost.balance)
+              ? rawCost.balance
+              : null,
+          currency: typeof rawCost.currency === "string" ? rawCost.currency : null,
+          error: typeof rawCost.error === "string" ? redact(rawCost.error) : null,
+        }
+      : undefined;
   const regionRows = Array.isArray(trafficAggregation?.byBusinessRegion)
     ? trafficAggregation.byBusinessRegion.flatMap((value) => {
         const row = recordOf(value);
@@ -239,6 +277,7 @@ export function adaptDonorStatus(value: unknown): DonorStatusResponse {
             ? trafficAggregation.summationScope
             : null,
         traffic_by_business_region: regionRows,
+        ...(cost === undefined ? {} : { cost }),
       },
     ],
   };

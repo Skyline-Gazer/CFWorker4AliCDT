@@ -4,6 +4,7 @@ import {
   describeInstance,
   listCdtInternetTraffic,
   normaliseEcsStatus,
+  queryBssBilling,
   reduceTraffic,
   startInstance,
   stopInstance,
@@ -312,6 +313,62 @@ describe("listCdtInternetTraffic", () => {
     });
     expect(result).toBeInstanceOf(TrafficUnavailableError);
     expect(result).not.toMatchObject({ totalBytes: 0 });
+  });
+});
+
+describe("queryBssBilling", () => {
+  it("returns disabled null data without making an HTTP call", async () => {
+    const { fetch, calls } = stubFetch([]);
+    const result = await queryBssBilling({ ...CONTEXT, enabled: false, fetch });
+    expect(result).toEqual({
+      enabled: false,
+      monthly_cost: null,
+      balance: null,
+      currency: null,
+      error: null,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reads cash balance from QueryAccountBalance through callRpc", async () => {
+    const { fetch, calls } = stubFetch([
+      json({
+        Code: "200",
+        Success: true,
+        Data: { AvailableCashAmount: "123.45", Currency: "USD" },
+      }),
+    ]);
+    const result = await queryBssBilling({ ...CONTEXT, enabled: true, fetch });
+    expect(result).toEqual({
+      enabled: true,
+      monthly_cost: null,
+      balance: 123.45,
+      currency: "USD",
+      error: null,
+    });
+    expect(calls[0]?.url).toBe("https://bssopenapi.aliyuncs.com/");
+    expect(sentBody(calls[0])).toContain("Action=QueryAccountBalance");
+    expect(sentBody(calls[0])).toContain("Version=2017-12-14");
+  });
+
+  it("returns null amounts and a safe error on RPC and parse failures", async () => {
+    const rejected = stubFetch([json({ Code: "NoPermission", Message: "sensitive" }, 403)]);
+    expect(await queryBssBilling({ ...CONTEXT, enabled: true, fetch: rejected.fetch })).toEqual({
+      enabled: true,
+      monthly_cost: null,
+      balance: null,
+      currency: null,
+      error: "BSS billing request failed.",
+    });
+
+    const malformed = stubFetch([json({ Code: "200", Success: true, Data: {} })]);
+    expect(await queryBssBilling({ ...CONTEXT, enabled: true, fetch: malformed.fetch })).toEqual({
+      enabled: true,
+      monthly_cost: null,
+      balance: null,
+      currency: null,
+      error: "BSS billing response was incomplete.",
+    });
   });
 });
 
