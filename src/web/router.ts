@@ -88,6 +88,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_config", "GET"],
   ["get_billing", "GET"],
   ["send_test_webhook", "POST"],
+  ["send_test_email", "POST"],
 ]);
 
 function isKnownPath(path: string): boolean {
@@ -219,6 +220,20 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
       code:
         parsed.config.webhookUrl === undefined ? "WEBHOOK_NOT_CONFIGURED" : "BACKEND_NOT_AVAILABLE",
       action: "send_test_webhook",
+    });
+  }
+
+  if (action === "send_test_email") {
+    // Ignore browser SMTP credentials; only Worker bindings decide configuration.
+    const parsed = deps.config();
+    if (!parsed.ok) return result(500, "Internal Server Error");
+    const configured = parsed.config.smtpHost !== undefined && parsed.config.smtpFrom !== undefined;
+    return jsonResult(501, {
+      success: false,
+      available: false,
+      mutation: false,
+      code: configured ? "BACKEND_NOT_AVAILABLE" : "SMTP_NOT_CONFIGURED",
+      action: "send_test_email",
     });
   }
 

@@ -122,6 +122,7 @@ describe("route — protected routes require authentication", () => {
     ["GET", "/?action=get_config"],
     ["GET", "/?action=get_billing"],
     ["POST", "/?action=send_test_webhook"],
+    ["POST", "/?action=send_test_email"],
     ["GET", "/?action=get_logs"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
@@ -382,7 +383,6 @@ describe("route — dispatch with valid credentials", () => {
       "setup",
       "control_instance",
       "save_config",
-      "send_test_email",
       "send_test_telegram",
       "clear_logs",
       "logout",
@@ -452,6 +452,7 @@ describe("route — dispatch with valid credentials", () => {
         webhook_token_configured: true,
         webhook_method: "POST",
         webhook_content_type: "application/json",
+        smtp_configured: false,
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -472,6 +473,7 @@ describe("route — dispatch with valid credentials", () => {
         "webhook_url_configured",
         "webhook_method",
         "webhook_content_type",
+        "smtp_configured",
       ].sort(),
     );
     for (const secret of [
@@ -574,6 +576,57 @@ describe("route — dispatch with valid credentials", () => {
     });
     expect(result.body).not.toContain("body-secret");
     expect(result.body).not.toContain("hooks.example");
+  });
+
+  it("fails closed for send_test_email when SMTP is not configured", async () => {
+    const { deps } = harness();
+    const result = await route(
+      request("POST", "/?action=send_test_email", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "SMTP_NOT_CONFIGURED",
+      action: "send_test_email",
+    });
+  });
+
+  it("fails closed for send_test_email when SMTP is configured but transport is inactive", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "secret-access-id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret-access-key",
+          ADMIN_TOKEN: "tok123",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          SMTP_HOST: "smtp.example.com",
+          SMTP_FROM: "noreply@example.com",
+          SMTP_PASS: "private-smtp-pass",
+        }),
+    });
+    const req = new Request("https://worker.test/?action=send_test_email", {
+      method: "POST",
+      headers: {
+        authorization: basic("admin", "tok123"),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "attacker@example.com", password: "body-smtp-pass" }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "BACKEND_NOT_AVAILABLE",
+      action: "send_test_email",
+    });
+    expect(result.body).not.toContain("private-smtp-pass");
+    expect(result.body).not.toContain("body-smtp-pass");
   });
 
   it("keeps authentication as the gate for donor login and never echoes credentials", async () => {
