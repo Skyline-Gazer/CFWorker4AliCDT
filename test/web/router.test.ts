@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { route } from "../../src/web/router";
 import type { RouteDeps, RouteResult } from "../../src/web/router";
 import type { AuthConfig } from "../../src/web/auth";
+import type { HistoryRow } from "../../src/storage/read";
 import { loadConfig } from "../../src/config";
 
 /**
@@ -119,6 +120,7 @@ describe("route — protected routes require authentication", () => {
   const protectedRoutes: readonly (readonly [string, string])[] = [
     ["GET", "/"],
     ["GET", "/?action=get_config"],
+    ["GET", "/?action=get_logs"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
   ];
@@ -198,6 +200,72 @@ describe("route — dispatch with valid credentials", () => {
     expect(counts.history).toBe(1);
   });
 
+  it("serves get_logs from the bounded history dependency", async () => {
+    const historyRow: HistoryRow = {
+      id: 7,
+      checked_at: "2026-09-26T11:00:00.000Z",
+      trigger: "scheduled",
+      status: "error",
+      traffic_gb: null,
+      threshold_gb: 42.5,
+      usage_percent: null,
+      remaining_gb: null,
+      ecs_status_before: null,
+      desired_ecs_state: null,
+      action: null,
+      decision_reason: null,
+      ecs_status_after: null,
+      control_ok: null,
+      webhook_attempted: null,
+      webhook_ok: null,
+      error_stage: "query",
+      error_message: "failed: WEBHOOK_TOKEN=private-webhook-token",
+      duration_ms: 123,
+    };
+    let historyCalls = 0;
+    let requestedLimit: number | undefined;
+    const { deps, counts } = harness({
+      history: async (limit) => {
+        historyCalls += 1;
+        requestedLimit = limit;
+        return [historyRow];
+      },
+    });
+    const result = await route(
+      request("GET", "/?action=get_logs&tab=errors", basic("admin", "tok123")),
+      deps,
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.headers["content-type"]).toContain("application/json");
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(JSON.parse(result.body)).toEqual({
+      success: true,
+      mutation: false,
+      data: [
+        {
+          id: 7,
+          time: historyRow.checked_at,
+          level: "error",
+          message: "error",
+          trigger: "scheduled",
+          status: "error",
+          traffic_gb: null,
+          threshold_gb: 42.5,
+          action: null,
+          decision_reason: null,
+          error_stage: "query",
+          error_message: "failed: WEBHOOK_TOKEN=[REDACTED]",
+          duration_ms: 123,
+        },
+      ],
+    });
+    expect(result.body).not.toContain("private-webhook-token");
+    expect(historyCalls).toBe(1);
+    expect(requestedLimit).toBe(200);
+    expect(counts.query + counts.dashboard).toBe(0);
+  });
+
   it("serves a query at POST /api/query", async () => {
     const { deps, counts } = harness();
     const result = await route(request("POST", "/api/query", basic("admin", "tok123")), deps);
@@ -251,7 +319,6 @@ describe("route — dispatch with valid credentials", () => {
       "send_test_email",
       "send_test_telegram",
       "send_test_webhook",
-      "get_logs",
       "clear_logs",
       "logout",
     ];
