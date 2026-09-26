@@ -276,13 +276,14 @@ describe("route — dispatch with valid credentials", () => {
 
   it("serves get_billing as an authenticated read-only action", async () => {
     const { deps } = harness({
-      billing: () => Promise.resolve({
-        enabled: true,
-        monthly_cost: null,
-        balance: 25.5,
-        currency: "CNY",
-        error: null,
-      }),
+      billing: () =>
+        Promise.resolve({
+          enabled: true,
+          monthly_cost: null,
+          balance: 25.5,
+          currency: "CNY",
+          error: null,
+        }),
     });
     const result = await route(
       request("GET", "/?action=get_billing", basic("admin", "tok123")),
@@ -316,13 +317,14 @@ describe("route — dispatch with valid credentials", () => {
     });
 
     const failed = harness({
-      billing: () => Promise.resolve({
-        enabled: true,
-        monthly_cost: null,
-        balance: null,
-        currency: null,
-        error: "BSS billing request failed.",
-      }),
+      billing: () =>
+        Promise.resolve({
+          enabled: true,
+          monthly_cost: null,
+          balance: null,
+          currency: null,
+          error: "BSS billing request failed.",
+        }),
     });
     const failedResult = await route(
       request("GET", "/?action=get_billing", basic("admin", "tok123")),
