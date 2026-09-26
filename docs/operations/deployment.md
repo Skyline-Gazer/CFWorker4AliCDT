@@ -560,30 +560,43 @@ make it act.
 
 ## 7. Cloudflare plan requirement
 
-**Measured Cron `cpuTime`: pending a successful production RELEASE.**
+**Required plan: Workers Free.** The first natural production Cron measured
+`cpuTimeMs` **9**, which is within the Workers Free **10 ms** CPU allowance.
+Paid / Standard Usage Model is not required solely by this measurement. The gate
+used is this single natural Cron observation.
+
+| Field | Value |
+| --- | --- |
+| RELEASE run | [36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416) (PASS) |
+| RELEASE SHA | `106f4d214a883ac9bfdf0798110f845092fbe971` |
+| Custom domain | `cdt.q9m3.com` |
+| Cron | `*/10 * * * *` (count 1) |
+| First natural Cron | `2026-09-25T16:50:28Z` |
+| Outcome | success / ok; action `none-running` |
+| D1 history write | yes |
+| Webhook | `webhook_attempted=false` |
+| `cpuTimeMs` | **9** (Workers Free 10 ms CPU, within limit) |
 
 Workers Free applies its 10 ms CPU allowance automatically. Do not configure a
 custom `limits.cpu_ms` in `wrangler.jsonc` or either generated deploy config:
-Cloudflare rejects custom CPU limits on Free with error **100328**. The Worker
-stays on Free while actual Cron CPU usage is measured.
+Cloudflare rejects custom CPU limits on Free with error **100328**.
 
 | Account model | Platform Cron CPU allowance (< 1 hour interval) | Deployment rule |
 | --- | --- | --- |
-| Workers Free | **10 ms**, applied automatically | Omit custom `limits.cpu_ms`. |
-| Workers Paid / Standard Usage Model | 30 s | Consider a custom limit only after measured evidence and an explicit owner choice. |
+| Workers Free | **10 ms**, applied automatically | Omit custom `limits.cpu_ms`. This is the required plan. |
+| Workers Paid / Standard Usage Model | 30 s | Not required by the measurement above. A later move, and any custom CPU limit, still requires measured evidence and an explicit owner choice. |
 
 Network waiting — the CDT call, the ECS call, the D1 write, the webhook — does
 **not** consume CPU. What does is JSON parsing, redaction, and rendering.
 
-**How to derive it:** after RELEASE, read the Cron invocation's `cpuTime` from
-Workers observability and record it here. Issue #28 remains open pending that
-measurement; Issue #31 remains open pending the plan conclusion based on the
-measurement. The owner's decision is to remain on **Free** initially. Any later
-move to Paid / Standard Usage Model, and any custom CPU limit there, requires
-measured evidence and an explicit owner choice (PLAN Q4, decided 2026-09-22).
+The figure is that Cron invocation's `cpuTime` from Workers observability, not an
+estimate. The owner's 2026-09-22 decision (PLAN Q4) was to remain on **Free**
+until a measurement existed. Any later move to Paid / Standard Usage Model, and
+any custom CPU limit there, requires measured evidence and an explicit owner
+choice.
 
 A terminated run issues **no** mutation, so it aborts safely — but it also reports
-nothing, which is why the figure must be recorded rather than assumed.
+nothing, which is why the figure is recorded rather than assumed.
 
 ## 8. Operating notes
 

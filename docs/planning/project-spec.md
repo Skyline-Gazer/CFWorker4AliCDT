@@ -9,6 +9,11 @@
 > Revision 3 makes generic webhook reporting optional while preserving the
 > fail-safe control path, required Alibaba configuration, and D1 history. The
 > failure semantics in §3–§6 and §11 are unchanged from Revision 1.
+>
+> Amendment (2026-09-26): the first natural production Cron measured `cpuTimeMs` 9,
+> within the Workers Free 10 ms allowance. Workers Free is the required plan (§11).
+> Paid is not required solely by that single-run observation. See
+> `docs/operations/deployment.md` §7.
 
 ## 1. Scope
 
@@ -698,18 +703,20 @@ different path that stops earlier.
 
 | Constraint | Consequence |
 | --- | --- |
-| Cron CPU: Free platform allowance is 10 ms; Paid / Standard Usage Model allows 30 s (intervals < 1 hour) | The platform applies Free's allowance automatically; deployment configs omit custom `limits.cpu_ms`. Retries are bounded; no busy-waiting; no long-polling. D1 writes add CPU on the scheduled path; measure after RELEASE. |
+| Cron CPU: Free platform allowance is 10 ms; Paid / Standard Usage Model allows 30 s (intervals < 1 hour) | The platform applies Free's allowance automatically; deployment configs omit custom `limits.cpu_ms`. Retries are bounded; no busy-waiting; no long-polling. D1 writes add CPU on the scheduled path. First natural Cron measured `cpuTimeMs` 9, within the 10 ms allowance, so the required plan is Workers Free. |
 | Cron duration: 15 min | The Worker stays short-lived and never waits for a terminal ECS state. |
 | Subrequests: 50 free / 10,000 paid | The run uses a small, bounded number of subrequests; the dashboard render performs none. |
 | Cron expressions: 5 fields, UTC, `1 = Sunday … 7 = Saturday` | `*/10 * * * *` is used and is unambiguous. |
 | Memory: 128 MB | Responses are small; no buffering of large bodies. |
 | Simultaneous connections: 6 | Calls are sequential, not fanned out. |
 
-The project stays on Workers Free initially. The Free CPU allowance is platform-
-applied, so custom `limits.cpu_ms` is omitted from committed and generated configs.
-Actual Cron `cpuTime` and the required plan remain pending a successful RELEASE
-(risk R8). A custom CPU setting may be considered only on Paid / Standard Usage
-Model after measurement and an explicit owner choice.
+The project stays on Workers Free. The Free CPU allowance is platform-applied, so
+custom `limits.cpu_ms` is omitted from committed and generated configs. The first
+natural production Cron measured `cpuTimeMs` 9, within the 10 ms allowance, so
+Workers Free is the required plan (risk R8; `docs/operations/deployment.md` §7).
+Paid is not required solely by that single-run observation. A custom CPU setting
+may be considered only on Paid / Standard Usage Model after a later measurement
+and an explicit owner choice.
 
 ## 12. Testing requirements
 
@@ -766,10 +773,11 @@ Q1 and Q3 from the PLAN remain open and are resolved by configuration defaults r
 than by assumptions baked into code: summation scope (Q1) and region identifier
 namespace (Q3). **Q4 (Cloudflare plan), Q5 (history retention), and Q6 (repository
 visibility / branch protection)** are resolved by owner decision (2026-09-22): the
-project stays on the Workers Free plan initially; its CPU allowance is platform-
-applied, and CPU is measured before any plan change (§11, risk R8); `traffic_checks`
-is retained indefinitely with no automatic deletion
-(§9.7); and the repository is public, so the `main` protection ruleset is enabled
+project stays on the Workers Free plan; its CPU allowance is platform-applied, and
+the first natural Cron measured `cpuTimeMs` 9, so Workers Free remains the
+required plan (§11, risk R8); `traffic_checks` is retained indefinitely with no
+automatic deletion (§9.7); and the repository is public, so the `main` protection
+ruleset is enabled
 (PLAN §14.1, risk R11). Each resolved item has a stated default in the PLAN, so
 implementation is unblocked while any remaining owner answer can still change behaviour
 without code changes.
