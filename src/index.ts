@@ -283,7 +283,7 @@ export default {
         });
         return { body: await response.text(), headers };
       },
-      history: async () => readHistoryFor(env, request),
+      history: async (limit) => readHistoryFor(env, request, limit),
       query: async () => readOnlyQuery(env),
     });
 
@@ -308,8 +308,15 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /** Bounded history read for `GET /api/history`. */
-async function readHistoryFor(env: Env, request: Request): Promise<HistoryRow[]> {
-  const limit = clampLimit(new URL(request.url).searchParams.get("limit"));
+async function readHistoryFor(
+  env: Env,
+  request: Request,
+  requestedLimit?: number,
+): Promise<HistoryRow[]> {
+  const limit =
+    requestedLimit === undefined
+      ? clampLimit(new URL(request.url).searchParams.get("limit"))
+      : clampLimit(String(requestedLimit));
   return readHistory(
     { limit: String(limit) },
     {

@@ -32,6 +32,17 @@ describe("donor static asset import", () => {
     expect(html).toContain("?action=get_history");
   });
 
+  it("unlocks through Authorization without persisting or posting the admin token", () => {
+    const html = readFileSync(asset("index.html"), "utf8");
+    expect(html).toContain("Authorization: `Bearer ${candidate}`");
+    expect(html).toContain("authorizationHeader = `Bearer ${candidate}`");
+    expect(html).toContain("?action=check_login");
+    expect(html).not.toMatch(/\b(?:localStorage|sessionStorage|document\.cookie)\s*(?:\.|=)/);
+    expect(html).not.toMatch(
+      /\?action=login['`][\s\S]{0,240}body:\s*JSON\.stringify\(\{\s*password/,
+    );
+  });
+
   it("preserves the bundled Vue, ECharts, and Tailwind license headers", () => {
     const vue = readFileSync(asset("vue.global.prod.js"), "utf8");
     const echarts = readFileSync(asset("echarts.min.js"), "utf8");
