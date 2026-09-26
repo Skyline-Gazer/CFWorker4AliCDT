@@ -6,8 +6,8 @@ an owner review packet only. Decision C authorizes **no production deployment**.
 ## Program and revision
 
 ```text
-PROGRAM_STATUS=UPDATE_PATH_READY_FOR_OWNER_REVIEW_PENDING_MERGE
-CURRENT_MAIN_SHA=ad671bc1f186faf78c3f063858eedc72ee5bb1fe (base; executor refreshes after merge)
+PROGRAM_STATUS=UPDATE_PATH_MERGED_AWAITING_OWNER_AUTHORIZATION
+CURRENT_MAIN_SHA=8d0d95673e78dfa7766d84fea2de2b71a3ac9ab6
 LAST_PRODUCTION_RELEASE_SHA=106f4d214a883ac9bfdf0798110f845092fbe971
 ISSUE=Refs #105
 ```
@@ -36,7 +36,7 @@ and has not been deployed.
 ```text
 LOCAL_VALIDATE=PASS
 COMMAND=npm run validate
-EVIDENCE=Format, lint, typecheck, test (801 passed / 24 files), deploy:dry-run PASS on branch feat/ops-existing-worker-update-path (Asia/Shanghai 2026-09-26 ~20:11)
+EVIDENCE=Format, lint, typecheck, test (801 passed / 24 files), deploy:dry-run PASS; CI green on PR #106; merged to main as 8d0d956 (Asia/Shanghai 2026-09-26)
 UPDATE_SMOKE=resolver --mode update emits triggers.crons=["*/10 * * * *"], secrets.required retained, custom_domain cdt.q9m3.com; --mode preflight still emits []
 ```
 
