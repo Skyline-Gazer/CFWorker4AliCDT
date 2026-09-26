@@ -67,6 +67,8 @@ describe("adaptDonorConfig — safe allowlist", () => {
         enable_billing: false,
         webhook_url_configured: true,
         webhook_token_configured: true,
+        webhook_method: "POST",
+        webhook_content_type: "application/json",
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -95,6 +97,8 @@ describe("adaptDonorConfig — safe allowlist", () => {
         "aliyun_credentials_configured",
         "webhook_token_configured",
         "webhook_url_configured",
+        "webhook_method",
+        "webhook_content_type",
       ].sort(),
     );
   });
@@ -111,6 +115,8 @@ describe("adaptDonorConfig — safe allowlist", () => {
       BUSINESS_REGION_ID: null,
       webhook_url_configured: false,
       webhook_token_configured: false,
+      webhook_method: "POST",
+      webhook_content_type: "application/json",
       admin_token_configured: false,
       aliyun_credentials_configured: true,
     });
