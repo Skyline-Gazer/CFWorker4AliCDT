@@ -296,6 +296,70 @@ describe("fetch — HTTP surface (SPEC §8.1)", () => {
     expect(response.status).toBe(401);
   });
 
+  it("refreshes the configured instance from live reads with no ECS mutation or D1 write", async () => {
+    const actions: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      const rpcBody = typeof init?.body === "string" ? init.body : "";
+      const action = new URLSearchParams(rpcBody).get("Action");
+      if (action !== null) actions.push(action);
+      if (action === "ListCdtInternetTraffic") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ TrafficDetails: [{ Traffic: 3 * 1024 ** 3 }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            Instances: { Instance: [{ InstanceId: "i-abc123", Status: "Running" }] },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    let prepared = 0;
+    const db = {
+      prepare: () => {
+        prepared += 1;
+        throw new Error("refresh must not access D1");
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request("https://w.test/?action=refresh_account", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tok123",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ id: "configured-instance" }),
+      }),
+      env({ TRAFFIC_DB: db as unknown as D1Database }),
+      ctx(),
+    );
+    const body: {
+      success: boolean;
+      mutation: boolean;
+      data: { flow_used: number; instanceStatus: string }[];
+    } = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      success: true,
+      mutation: false,
+      data: [{ flow_used: 3, instanceStatus: "Running" }],
+    });
+    expect(actions).toEqual(["ListCdtInternetTraffic", "DescribeInstances"]);
+    expect(actions).not.toContain("StartInstance");
+    expect(actions).not.toContain("StopInstance");
+    expect(prepared).toBe(0);
+    expect(JSON.stringify(body)).not.toContain(SECRET);
+    expect(JSON.stringify(body)).not.toContain("tok123");
+    fetchSpy.mockRestore();
+  });
+
   it("returns 404 for an unknown path", async () => {
     const response = await worker.fetch(new Request("https://w.test/nope"), env(), ctx());
     expect(response.status).toBe(404);

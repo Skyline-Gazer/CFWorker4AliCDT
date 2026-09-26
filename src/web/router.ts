@@ -2,8 +2,9 @@
  * HTTP route dispatch (SPEC §8.1, §8.5).
  *
  * The pathname surface is deliberately small and closed: four routes, one of
- * them public and inert. Donor query actions are handled by a separate failure
- * facade. Two properties are structural rather than conventional.
+ * them public and inert. Supported donor query actions adapt those same
+ * authenticated read paths; unsupported actions stay behind a failure facade.
+ * Two properties are structural rather than conventional.
  *
  * **No route can mutate an instance.** `RouteDeps` exposes no mutation seam at
  * all — there is no `startInstance`/`stopInstance` to call. A control route
@@ -20,8 +21,9 @@
 
 import { authenticate, basicChallenge } from "./auth";
 import type { AuthConfig } from "./auth";
-import { unsupportedDonorAction } from "./donor-actions";
+import { adaptDonorHistory, adaptDonorStatus, unsupportedDonorAction } from "./donor-actions";
 import { redact } from "../redact";
+import type { HistoryRow } from "../storage/read";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -34,7 +36,7 @@ export interface RouteDeps {
   /** `GET /` — server-rendered dashboard (SPEC §8.4). */
   readonly dashboard: () => HandlerOutput | Promise<HandlerOutput>;
   /** `GET /api/history` — bounded history (SPEC §9.5). Serialised as-is. */
-  readonly history: () => Promise<unknown>;
+  readonly history: (limit?: number) => Promise<readonly HistoryRow[]>;
   /** `POST /api/query` — strictly read-only live query (SPEC §8.5). Serialised as-is. */
   readonly query: () => Promise<unknown>;
 }
@@ -61,6 +63,15 @@ const ROUTES: readonly { readonly path: string; readonly methods: readonly strin
 
 /** Paths served without authentication. Only liveness. */
 const PUBLIC_PATHS: readonly string[] = ["/health"];
+
+/** The methods actually used by the donor page for the adapted actions. */
+const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
+  ["login", "POST"],
+  ["check_login", "GET"],
+  ["get_status", "GET"],
+  ["refresh_account", "POST"],
+  ["get_history", "GET"],
+]);
 
 function isKnownPath(path: string): boolean {
   return ROUTES.some((entry) => entry.path === path);
@@ -109,7 +120,17 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
     if (method !== "GET" && method !== "POST") {
       return result(405, "Method Not Allowed", { allow: "GET, POST" });
     }
-    return unsupportedDonorAction(url.searchParams.get("action") ?? "");
+    const action = url.searchParams.get("action") ?? "";
+    const expectedMethod = ADAPTED_DONOR_METHODS.get(action);
+    if (expectedMethod !== undefined && method !== expectedMethod) {
+      return result(405, "Method Not Allowed", { allow: expectedMethod });
+    }
+    try {
+      return await dispatchDonorAction(action, deps);
+    } catch (cause) {
+      console.warn(`[http] donor action failed (${redact(errorMessage(cause))})`);
+      return result(500, "Internal Server Error");
+    }
   }
 
   // After namespace authentication, an unknown path is not part of the surface,
@@ -138,6 +159,34 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
     console.warn(`[http] handler failed (${redact(errorMessage(cause))})`);
     return result(500, "Internal Server Error");
   }
+}
+
+async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<RouteResult> {
+  // Authorization was checked before this function runs. These are UX replies
+  // to that check only; no credential is parsed from a request body or returned.
+  if (action === "login" || action === "check_login") {
+    return jsonResult(200, { success: true, logged_in: true, mutation: false });
+  }
+
+  if (action === "get_status" || action === "refresh_account") {
+    return jsonResult(200, adaptDonorStatus(await deps.query()));
+  }
+
+  if (action === "get_history") {
+    // The donor chart receives at most the newest 200 D1 observations.
+    const rows = await deps.history(200);
+    return jsonResult(200, adaptDonorHistory(rows));
+  }
+
+  const unsupported = unsupportedDonorAction(action);
+  return result(unsupported.status, unsupported.body, unsupported.headers);
+}
+
+function jsonResult(status: number, value: unknown): RouteResult {
+  return result(status, JSON.stringify(value), {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
 }
 
 function allowedMethodsFor(path: string): string {

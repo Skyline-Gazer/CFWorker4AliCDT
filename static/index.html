@@ -141,6 +141,9 @@
 
         <main v-if="initialized && !loading && !criticalError"
             class="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in-up">
+            <div v-if="statusMessage" class="col-span-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {{ statusMessage }}
+            </div>
             <div v-for="(item, index) in statusData" :key="index"
                 class="glass-panel rounded-[32px] p-6 flex flex-col justify-between relative overflow-hidden group hover:shadow-2xl transition-all duration-500">
                 <div class="absolute top-0 right-0 p-6 opacity-50 flex gap-2">
@@ -164,7 +167,7 @@
                         </svg>
                     </button>
                     <div class="w-2 h-2 rounded-full transition-colors duration-500 mt-1.5"
-                        :class="item.rate95 ? 'bg-red-500 shadow-[0_0_10px_rgba(255,59,48,0.5)]' : 'bg-green-500 shadow-[0_0_10px_rgba(52,199,89,0.5)]'">
+                        :class="item.thresholdReached === true ? 'bg-red-500 shadow-[0_0_10px_rgba(255,59,48,0.5)]' : item.thresholdReached === false ? 'bg-green-500 shadow-[0_0_10px_rgba(52,199,89,0.5)]' : 'bg-gray-400'">
                     </div>
                 </div>
 
@@ -173,20 +176,18 @@
                         <span
                             class="px-2 py-1 bg-gray-100/50 rounded-lg text-[10px] font-bold tracking-wider text-gray-500 uppercase border border-white/40">{{
                             item.regionName }}</span>
-                        <span class="text-[10px] text-gray-400">{{ item.lastUpdated ? item.lastUpdated.split(' ')[1] :
-                            '' }} 更新</span>
+                        <span v-if="item.lastUpdated" class="text-[10px] text-gray-400">{{ item.lastUpdated.split(' ')[1] }} 更新</span>
                     </div>
                     <h3 class="text-3xl font-extrabold tracking-tighter text-[#1C1C1E]">
-                        {{ item.flow_used }} <span class="text-base font-medium text-gray-400">GB</span>
+                        {{ item.flow_used === null ? '未知' : item.flow_used }} <span class="text-base font-medium text-gray-400">GB</span>
                     </h3>
                     <div class="flex justify-between items-end mt-1">
                         <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">已用流量</p>
-                        <p class="text-xs font-medium text-gray-400">{{ item.percentageOfUse }}% / {{ item.flow_total
-                            }}G</p>
+                        <p class="text-xs font-medium text-gray-400">{{ item.percentageOfUse === null ? '未知' : item.percentageOfUse.toFixed(1) + '%' }} / {{ item.flow_total === null ? '未知' : item.flow_total + ' GB' }}</p>
                     </div>
-                    <div class="w-full h-1.5 bg-gray-200/50 rounded-full mt-3 overflow-hidden">
+                    <div v-if="item.percentageOfUse !== null" class="w-full h-1.5 bg-gray-200/50 rounded-full mt-3 overflow-hidden">
                         <div class="h-full rounded-full transition-all duration-1000 ease-out"
-                            :class="item.rate95 ? 'bg-[#FF3B30]' : 'bg-[#1C1C1E]'"
+                            :class="item.thresholdReached ? 'bg-[#FF3B30]' : 'bg-[#1C1C1E]'"
                             :style="{ width: Math.min(item.percentageOfUse, 100) + '%' }"></div>
                     </div>
                 </div>
@@ -197,7 +198,7 @@
                             item.instanceStatus }}</span>
                     </div>
                     <div class="flex justify-between items-center">
-                        <span class="text-sm font-medium text-gray-500">账号</span>
+                        <span class="text-sm font-medium text-gray-500">实例</span>
                         <span class="text-sm font-medium text-[#1C1C1E] font-mono">{{ item.account }}</span>
                     </div>
                     <div v-if="isAdmin && item.cost && item.cost.enabled" class="flex justify-between items-center">
@@ -220,8 +221,8 @@
                         <span class="text-sm font-medium text-[#1C1C1E]">{{ item.remark }}</span>
                     </div>
                     <div class="flex justify-between items-center">
-                        <span class="text-xs font-medium text-gray-400">当前阈值</span>
-                        <span class="text-xs font-medium text-gray-400">{{ item.threshold }}%</span>
+                        <span class="text-xs font-medium text-gray-400">流量阈值</span>
+                        <span class="text-xs font-medium text-gray-400">{{ item.flow_total === null ? '未知' : item.flow_total + ' GB' }}</span>
                     </div>
 
                     <!-- 新增：手工控制区域 (仅登录用户可见，且仅在 运行中/已停止 状态下显示) -->
@@ -271,7 +272,7 @@
                     </div>
                 </div>
                 <div v-if="statusData.length === 0" class="col-span-full py-20 text-center text-gray-400">
-                    <p>暂无监控账号，请点击右上角登录管理员添加。</p>
+                    <p>当前没有可显示的实时状态。</p>
                 </div>
         </main>
 
@@ -356,14 +357,16 @@
         </div>
 
         <div v-if="showLoginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div class="absolute inset-0 bg-gray-200/30 backdrop-blur-md" @click="showLoginModal = false"></div>
+            <div class="absolute inset-0 bg-gray-200/30 backdrop-blur-md" @click="closeLoginModal"></div>
             <div
                 class="glass-panel w-full max-w-md p-8 rounded-[40px] relative z-10 transform transition-all shadow-2xl">
                 <h2 class="text-2xl font-bold mb-6 text-center">管理员验证</h2>
-                <input type="password" v-model="passwordInput" autocomplete="off" placeholder="Worker 身份验证由浏览器处理"
+                <input type="password" v-model="passwordInput" autocomplete="off" placeholder="输入 Worker ADMIN_TOKEN"
                     class="w-full glass-input px-4 py-3 rounded-xl border border-transparent focus:outline-none transition-all text-center text-lg mb-6">
+                <p v-if="loginError" class="text-sm text-red-600 text-center mb-4">{{ loginError }}</p>
                 <button @click="performLogin"
                     class="w-full bg-[#1C1C1E] text-white py-3 rounded-2xl font-semibold tap-effect shadow-lg">解锁控制台</button>
+                <p class="text-xs text-gray-400 text-center mt-4">令牌仅在此页面内存中使用，并通过 Authorization 请求头发送。</p>
             </div>
         </div>
 
@@ -1030,8 +1033,22 @@
                 const checkingLogin = ref(true);
                 const showLoginModal = ref(false);
                 const passwordInput = ref('');
+                const loginError = ref('');
+                const statusMessage = ref('');
                 const sendingEmail = ref(false);
                 const criticalError = ref(null);
+
+                // A manually entered ADMIN_TOKEN lives only for this page load.
+                // It is never written to localStorage, sessionStorage, a cookie,
+                // a request body, or a response body.
+                let authorizationHeader = null;
+                const apiFetch = (input, options = {}) => {
+                    const headers = new Headers(options.headers || {});
+                    if (authorizationHeader && !headers.has('Authorization')) {
+                        headers.set('Authorization', authorizationHeader);
+                    }
+                    return fetch(input, { ...options, headers, credentials: 'same-origin' });
+                };
 
                 const initialized = ref(true);
                 const loadingCheckInit = ref(true);
@@ -1107,34 +1124,6 @@
                     Accounts: []
                 });
 
-                const checkInitStatus = async () => {
-                    loadingCheckInit.value = true;
-                    try {
-                        const res = await fetch('?action=check_init');
-                        const data = await res.json();
-
-                        if (data.error) {
-                            criticalError.value = data.message || data.error;
-                            loading.value = false;
-                            return;
-                        }
-
-                        initialized.value = data.initialized;
-
-                        if (data.initialized) {
-                            checkLoginStatus();
-                        } else {
-                            loading.value = false;
-                        }
-                    } catch (e) {
-                        console.error('Init check failed', e);
-                        criticalError.value = "无法连接到服务器或响应格式错误。";
-                        loading.value = false;
-                    } finally {
-                        loadingCheckInit.value = false;
-                    }
-                };
-
                 const performSetup = async () => {
                     alert('此 Worker 没有浏览器初始化接口。请通过 Cloudflare Worker variables 和 Secrets 配置运行参数。');
                 };
@@ -1142,46 +1131,52 @@
                 const checkLoginStatus = async () => {
                     checkingLogin.value = true;
                     try {
-                        const res = await fetch('?action=check_login');
-                        const data = await res.json();
-                        if (data.error) {
-                            criticalError.value = data.message || data.error;
+                        const res = await apiFetch('?action=check_login');
+                        if (res.status === 401) {
+                            showLoginModal.value = true;
+                            loading.value = false;
                             return;
                         }
+                        const data = await res.json();
                         if (data.logged_in) {
                             isAdmin.value = true;
-                            fetchConfig();
-                            startLogPolling(); // 登录后开始轮询日志
+                            await fetchData();
+                        } else {
+                            isAdmin.value = false;
+                            showLoginModal.value = true;
+                            loading.value = false;
                         }
-                        fetchData();
-                    } catch (e) {
-                        console.error('Session check failed', e);
+                    } catch {
+                        statusMessage.value = '无法连接到 Worker。';
+                        loading.value = false;
                     } finally {
                         checkingLogin.value = false;
+                        loadingCheckInit.value = false;
                     }
                 };
 
                 const fetchData = async () => {
                     if (statusData.value.length === 0) loading.value = true;
                     try {
-                        const res = await fetch('?action=get_status');
+                        const res = await apiFetch('?action=get_status');
+                        if (res.status === 401) {
+                            authorizationHeader = null;
+                            isAdmin.value = false;
+                            showLoginModal.value = true;
+                            statusData.value = [];
+                            statusMessage.value = '需要重新验证管理员令牌。';
+                            return;
+                        }
                         const json = await res.json();
 
-                        if (json.error) {
-                            criticalError.value = json.error;
-                        } else {
-                            statusData.value = json.data || [];
-                            if (json.system_last_run) {
-                                const now = Math.floor(Date.now() / 1000);
-                                const diff = now - json.system_last_run;
-                                cronWarning.value = diff > 180;
-                            } else {
-                                if (statusData.value.length > 0) cronWarning.value = true;
-                            }
-                        }
-                    } catch (e) {
-                        console.error(e);
+                        statusData.value = json.success ? (json.data || []) : [];
+                        statusMessage.value = json.success ? '' : (json.error || '实时状态不可用。');
+                        // This adapter has no last-run observation unless D1
+                        // supplies one, so do not infer a missed Cron run.
+                        cronWarning.value = false;
+                    } catch {
                         statusData.value = [];
+                        statusMessage.value = '无法读取实时状态。';
                     } finally {
                         loading.value = false;
                     }
@@ -1190,18 +1185,19 @@
                 const refreshSingle = async (id, index) => {
                     refreshingMap.value[index] = true;
                     try {
-                        const res = await fetch('?action=refresh_account', {
+                        const res = await apiFetch('?action=refresh_account', {
                             method: 'POST',
                             body: JSON.stringify({ id: id })
                         });
                         const data = await res.json();
                         if (data.success) {
-                            await fetchData();
+                            statusData.value = data.data || [];
+                            statusMessage.value = '';
                         } else {
-                            alert(data.message || '此功能暂不可用');
+                            alert(data.error || '实时刷新不可用');
                         }
-                    } catch (e) {
-                        console.error(e);
+                    } catch {
+                        alert('无法连接到 Worker。');
                     } finally {
                         refreshingMap.value[index] = false;
                     }
@@ -1219,7 +1215,7 @@
                     isOperatingMap.value[index] = true;
 
                     try {
-                        const res = await fetch('?action=control_instance', {
+                        const res = await apiFetch('?action=control_instance', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -1247,8 +1243,7 @@
                             // 失败：弹出错误信息
                             alert(data.message || '操作失败，请检查日志');
                         }
-                    } catch (e) {
-                        console.error(e);
+                    } catch {
                         alert('网络请求失败，请检查连接');
                     } finally {
                         // 4. 释放按钮锁定（虽然按钮已经消失了，但逻辑上要释放）
@@ -1279,14 +1274,14 @@
 
                     try {
                         const [res] = await Promise.all([
-                            fetch(`?action=get_history&id=${id}`),
+                            apiFetch(`?action=get_history&id=${id}`),
                             loadECharts()
                         ]);
                         const json = await res.json();
-                        if (json.error) {
+                        if (!json.success) {
                             chartLoading.value = false;
                             showChartModal.value = false;
-                            criticalError.value = json.message || json.error;
+                            statusMessage.value = json.error || '历史数据不可用。';
                             return;
                         }
                         currentChartData = json.data || {};
@@ -1299,9 +1294,10 @@
                             }
                         }, 100);
 
-                    } catch (e) {
-                        console.error('Fetch history failed', e);
+                    } catch {
                         chartLoading.value = false;
+                        showChartModal.value = false;
+                        statusMessage.value = '无法读取历史数据。';
                     }
                 };
 
@@ -1422,21 +1418,60 @@
 
                 const toggleAdmin = () => {
                     if (isAdmin.value) {
-                        alert('Worker 使用 HTTP Basic/Bearer 身份验证；此界面不会创建或注销服务器会话。');
+                        authorizationHeader = null;
+                        isAdmin.value = false;
+                        statusData.value = [];
+                        statusMessage.value = '';
+                        alert('已清除此页面内存中的令牌。Worker 不维护浏览器会话；浏览器可能仍缓存 HTTP Basic 身份验证。');
                     } else {
+                        loginError.value = '';
                         showLoginModal.value = true;
                     }
                 };
 
-                const performLogin = () => {
+                const closeLoginModal = () => {
                     passwordInput.value = '';
+                    loginError.value = '';
                     showLoginModal.value = false;
-                    alert('请使用 Worker 的 HTTP Basic/Bearer 身份验证。不会向浏览器 API 发送密码，也不会创建单独会话。');
+                };
+
+                const performLogin = async () => {
+                    const candidate = passwordInput.value;
+                    if (!candidate) {
+                        loginError.value = '请输入 Worker ADMIN_TOKEN。';
+                        return;
+                    }
+                    checkingLogin.value = true;
+                    loginError.value = '';
+                    try {
+                        const res = await apiFetch('?action=login', {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${candidate}` }
+                        });
+                        if (!res.ok) {
+                            loginError.value = '令牌无效或 Worker 拒绝了请求。';
+                            return;
+                        }
+                        const data = await res.json();
+                        if (!data.logged_in) {
+                            loginError.value = 'Worker 未确认身份验证。';
+                            return;
+                        }
+                        authorizationHeader = `Bearer ${candidate}`;
+                        showLoginModal.value = false;
+                        isAdmin.value = true;
+                        await fetchData();
+                    } catch {
+                        loginError.value = '无法连接到 Worker。';
+                    } finally {
+                        passwordInput.value = '';
+                        checkingLogin.value = false;
+                    }
                 };
 
                 const fetchConfig = async () => {
                     try {
-                        const res = await fetch('?action=get_config');
+                        const res = await apiFetch('?action=get_config');
                         const data = await res.json();
                         if (data.error) {
                             criticalError.value = data.message || data.error;
@@ -1485,7 +1520,7 @@
                 const fetchLogs = async () => {
                     if (!isAdmin.value) return;
                     try {
-                        const res = await fetch(`?action=get_logs&tab=${currentLogTab.value}`);
+                        const res = await apiFetch(`?action=get_logs&tab=${currentLogTab.value}`);
                         const data = await res.json();
                         if (data.data) {
                             systemLogs.value = data.data;
@@ -1499,7 +1534,7 @@
                 const clearLogs = async () => {
                     if (!confirm(`确定清空"${currentLogTab.value === 'action' ? '动作' : '心跳'}"日志吗？`)) return;
                     try {
-                        const res = await fetch('?action=clear_logs', {
+                        const res = await apiFetch('?action=clear_logs', {
                             method: 'POST',
                             body: JSON.stringify({ tab: currentLogTab.value })
                         });
@@ -1556,7 +1591,7 @@
                 };
 
                 onMounted(() => {
-                    checkInitStatus();
+                    checkLoginStatus();
                 });
 
                 onUnmounted(() => {
@@ -1564,12 +1599,12 @@
                 });
 
                 return {
-                    statusData, loading, isAdmin, checkingLogin, showLoginModal, passwordInput, config, initialized, loadingCheckInit, setupData, criticalError,
+                    statusData, loading, isAdmin, checkingLogin, showLoginModal, passwordInput, loginError, statusMessage, config, initialized, loadingCheckInit, setupData, criticalError,
                     regionSearchFocus, aliyunRegions, refreshingMap, systemLogs, cronWarning,
                     showChartModal, chartLoading, chartMode, currentChartAccount, openChart, closeChart, switchChartMode, isChartEmpty,
                     isOperatingMap,
                     toggleInstance,
-                    toggleAdmin, performLogin, saveConfig, sendTestEmail, sendingEmail, addAccount, removeAccount, getInstanceStatusColor, performSetup, refreshSingle, fetchLogs,
+                    toggleAdmin, performLogin, closeLoginModal, saveConfig, sendTestEmail, sendingEmail, addAccount, removeAccount, getInstanceStatusColor, performSetup, refreshSingle, fetchLogs,
                     currentLogTab, clearLogs, logAutoRefresh,
                     currentNotifyTab, testingTelegram, testingWebhook, sendTestTelegram, sendTestWebhook
                 };

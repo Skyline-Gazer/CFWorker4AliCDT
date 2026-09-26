@@ -26,11 +26,21 @@ function basic(user: string, password: string): string {
 
 interface Harness {
   readonly deps: RouteDeps;
-  readonly counts: { dashboard: number; history: number; query: number };
+  readonly counts: {
+    dashboard: number;
+    history: number;
+    query: number;
+    historyLimit: number | undefined;
+  };
 }
 
 function harness(overrides: Partial<RouteDeps> = {}): Harness {
-  const counts = { dashboard: 0, history: 0, query: 0 };
+  const counts: Harness["counts"] = {
+    dashboard: 0,
+    history: 0,
+    query: 0,
+    historyLimit: undefined,
+  };
   const defaults: RouteDeps = {
     auth: AUTH,
     dashboard: () => {
@@ -39,8 +49,9 @@ function harness(overrides: Partial<RouteDeps> = {}): Harness {
     },
     // `unknown` return types: the router only serialises these, so it must not
     // require a specific shape from the read paths.
-    history: () => {
+    history: (limit) => {
       counts.history += 1;
+      counts.historyLimit = limit;
       return Promise.resolve([]);
     },
     query: () => {
@@ -213,24 +224,19 @@ describe("route — dispatch with valid credentials", () => {
     expect(body.mutation).toBe(false);
   });
 
-  it("returns non-success placeholders for every inventoried donor action", async () => {
+  it("returns non-success placeholders for donor actions outside this adapter", async () => {
     const { deps } = harness();
     const actions = [
       "check_init",
       "setup",
-      "login",
-      "check_login",
-      "get_status",
       "control_instance",
       "get_config",
       "save_config",
       "send_test_email",
       "send_test_telegram",
       "send_test_webhook",
-      "refresh_account",
       "get_logs",
       "clear_logs",
-      "get_history",
       "logout",
     ];
 
@@ -270,7 +276,7 @@ describe("route — dispatch with valid credentials", () => {
   it("does not serve dashboard HTML for unsupported donor actions", async () => {
     const { deps, counts } = harness();
     const result = await route(
-      request("GET", "/?action=get_status", basic("admin", "tok123")),
+      request("GET", "/?action=get_config", basic("admin", "tok123")),
       deps,
     );
 
@@ -278,6 +284,172 @@ describe("route — dispatch with valid credentials", () => {
     expect(result.headers["content-type"]).toContain("application/json");
     expect(result.body).not.toContain("<html>");
     expect(counts.dashboard).toBe(0);
+  });
+
+  it("keeps authentication as the gate for donor login and never echoes credentials", async () => {
+    const { deps } = harness();
+    const denied = await route(request("POST", "/?action=login"), deps);
+    expect(denied.status).toBe(401);
+    expect(denied.body).not.toContain("tok123");
+
+    const accepted = await route(request("POST", "/?action=login", "Bearer tok123"), deps);
+    expect(accepted.status).toBe(200);
+    expect(JSON.parse(accepted.body)).toEqual({
+      success: true,
+      logged_in: true,
+      mutation: false,
+    });
+    expect(accepted.body).not.toContain("tok123");
+  });
+
+  it("rejects unauthenticated status, refresh, and history actions before any read", async () => {
+    const { deps, counts } = harness();
+    const actions: readonly (readonly [string, string])[] = [
+      ["GET", "/?action=get_status"],
+      ["POST", "/?action=refresh_account"],
+      ["GET", "/?action=get_history"],
+    ];
+
+    for (const [method, path] of actions) {
+      const missing = await route(request(method, path), deps);
+      const invalid = await route(request(method, path, "Bearer invalid"), deps);
+      expect(missing.status).toBe(401);
+      expect(invalid.status).toBe(401);
+      expect(missing.body).not.toContain("tok123");
+      expect(invalid.body).not.toContain("invalid");
+    }
+
+    expect(counts.query).toBe(0);
+    expect(counts.history).toBe(0);
+  });
+
+  it("answers check_login only after existing Authorization validation", async () => {
+    const { deps } = harness();
+    const invalid = await route(request("GET", "/?action=check_login", "Bearer wrong"), deps);
+    const valid = await route(
+      request("GET", "/?action=check_login", basic("admin", "tok123")),
+      deps,
+    );
+
+    expect(invalid.status).toBe(401);
+    expect(valid.status).toBe(200);
+    expect(JSON.parse(valid.body)).toMatchObject({
+      success: true,
+      logged_in: true,
+      mutation: false,
+    });
+  });
+
+  it("maps status and refresh to the real query result without a history write", async () => {
+    const queryResult = {
+      status: "success",
+      trafficGB: 1.5,
+      thresholdGB: 10,
+      ecsStatus: "Running",
+      desired: "running",
+      action: "none-running",
+      mutation: false,
+    };
+    let queryCalls = 0;
+    const { deps, counts } = harness({
+      query: () => {
+        queryCalls += 1;
+        return Promise.resolve(queryResult);
+      },
+    });
+
+    const status = await route(request("GET", "/?action=get_status", "Bearer tok123"), deps);
+    const refresh = await route(request("POST", "/?action=refresh_account", "Bearer tok123"), deps);
+
+    expect(JSON.parse(status.body)).toMatchObject({
+      success: true,
+      mutation: false,
+      data: [{ flow_used: 1.5, flow_total: 10, percentageOfUse: 15, instanceStatus: "Running" }],
+    });
+    expect(JSON.parse(refresh.body)).toEqual(JSON.parse(status.body));
+    expect(queryCalls).toBe(2);
+    expect(counts.history).toBe(0);
+  });
+
+  it("adapts donor history from the newest bounded read", async () => {
+    const checkedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    let historyCalls = 0;
+    let requestedLimit: number | undefined;
+    const { deps, counts } = harness({
+      history: (limit) => {
+        historyCalls += 1;
+        requestedLimit = limit;
+        return Promise.resolve([
+          {
+            id: 2,
+            checked_at: checkedAt,
+            trigger: "scheduled",
+            status: "success",
+            traffic_gb: 3,
+            threshold_gb: 180,
+            usage_percent: 1.6667,
+            remaining_gb: 177,
+            ecs_status_before: "Running",
+            desired_ecs_state: "running",
+            action: "none-running",
+            ecs_status_after: "Running",
+            control_ok: 1,
+            webhook_attempted: 0,
+            webhook_ok: null,
+            error_stage: null,
+            error_message: null,
+            duration_ms: 1,
+          },
+          {
+            id: 1,
+            checked_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+            trigger: "scheduled",
+            status: "error",
+            traffic_gb: null,
+            threshold_gb: 180,
+            usage_percent: null,
+            remaining_gb: null,
+            ecs_status_before: null,
+            desired_ecs_state: null,
+            action: null,
+            ecs_status_after: null,
+            control_ok: 1,
+            webhook_attempted: 0,
+            webhook_ok: null,
+            error_stage: "cdt-query",
+            error_message: null,
+            duration_ms: 1,
+          },
+        ]);
+      },
+    });
+
+    const result = await route(request("GET", "/?action=get_history", "Bearer tok123"), deps);
+
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toMatchObject({
+      success: true,
+      mutation: false,
+      data: {
+        history_24h: [{ time: checkedAt, value: 3 }],
+        history_30d: [{ date: checkedAt.slice(0, 10), value: 3 }],
+      },
+    });
+    expect(historyCalls).toBe(1);
+    expect(requestedLimit).toBe(200);
+    expect(counts.history).toBe(0);
+  });
+
+  it("keeps logout as an explicit unsupported placeholder", async () => {
+    const { deps } = harness();
+    const result = await route(request("POST", "/?action=logout", "Bearer tok123"), deps);
+
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toMatchObject({
+      success: false,
+      code: "FEATURE_NOT_IMPLEMENTED",
+      mutation: false,
+    });
   });
 });
 
