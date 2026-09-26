@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { adaptDonorHistory, adaptDonorStatus } from "../../src/web/donor-actions";
+import { adaptDonorConfig, adaptDonorHistory, adaptDonorStatus } from "../../src/web/donor-actions";
+import { loadConfig } from "../../src/config";
 import type { HistoryRow } from "../../src/storage/read";
 
 function row(overrides: Partial<HistoryRow> = {}): HistoryRow {
@@ -27,6 +28,87 @@ function row(overrides: Partial<HistoryRow> = {}): HistoryRow {
     ...overrides,
   };
 }
+
+describe("adaptDonorConfig — safe allowlist", () => {
+  it("returns configured values and presence booleans without secret material", () => {
+    const parsed = loadConfig({
+      ALIYUN_ACCESS_KEY_ID: "private-access-id",
+      ALIYUN_ACCESS_KEY_SECRET: "private-access-secret",
+      ADMIN_TOKEN: "private-admin-token",
+      WEBHOOK_URL: "https://hooks.example/private?token=private-url-token",
+      WEBHOOK_TOKEN: "private-webhook-token",
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-0123456789abcdef0",
+      TRAFFIC_THRESHOLD_GB: "24",
+      CDT_ENDPOINT: "cdt.example.aliyun.com",
+      BUSINESS_REGION_ID: "cn-hongkong",
+      SIGNATURE_VERSION: "v2",
+      STOPPED_MODE: "StopCharging",
+    });
+    if (!parsed.ok) throw new Error("fixture config should validate");
+
+    const result = adaptDonorConfig(parsed.config);
+    expect(result).toEqual({
+      success: true,
+      mutation: false,
+      data: {
+        REGION_ID: "cn-hongkong",
+        ECS_INSTANCE_ID: "i-0123456789abcdef0",
+        TRAFFIC_THRESHOLD_GB: 24,
+        CDT_ENDPOINT: "cdt.example.aliyun.com",
+        BUSINESS_REGION_ID: "cn-hongkong",
+        SIGNATURE_VERSION: "v2",
+        STOPPED_MODE: "StopCharging",
+        webhook_url_configured: true,
+        webhook_token_configured: true,
+        admin_token_configured: true,
+        aliyun_credentials_configured: true,
+      },
+    });
+    const serialized = JSON.stringify(result);
+    for (const secret of [
+      "private-access-id",
+      "private-access-secret",
+      "private-admin-token",
+      "private-url-token",
+      "private-webhook-token",
+      "https://hooks.example/private",
+    ])
+      expect(serialized).not.toContain(secret);
+    expect(Object.keys(result.data).sort()).toEqual(
+      [
+        "BUSINESS_REGION_ID",
+        "CDT_ENDPOINT",
+        "ECS_INSTANCE_ID",
+        "REGION_ID",
+        "SIGNATURE_VERSION",
+        "STOPPED_MODE",
+        "TRAFFIC_THRESHOLD_GB",
+        "admin_token_configured",
+        "aliyun_credentials_configured",
+        "webhook_token_configured",
+        "webhook_url_configured",
+      ].sort(),
+    );
+  });
+
+  it("returns null for unset business region and reports absent optional secrets", () => {
+    const parsed = loadConfig({
+      ALIYUN_ACCESS_KEY_ID: "id",
+      ALIYUN_ACCESS_KEY_SECRET: "secret",
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-0123456789abcdef0",
+    });
+    if (!parsed.ok) throw new Error("fixture config should validate");
+    expect(adaptDonorConfig(parsed.config).data).toMatchObject({
+      BUSINESS_REGION_ID: null,
+      webhook_url_configured: false,
+      webhook_token_configured: false,
+      admin_token_configured: false,
+      aliyun_credentials_configured: true,
+    });
+  });
+});
 
 describe("adaptDonorStatus — singleton read-model mapping", () => {
   it("maps the already-converted live query without inventing accounts", () => {

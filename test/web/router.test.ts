@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { route } from "../../src/web/router";
 import type { RouteDeps, RouteResult } from "../../src/web/router";
 import type { AuthConfig } from "../../src/web/auth";
+import { loadConfig } from "../../src/config";
 
 /**
  * HTTP dispatch (SPEC §8.1).
@@ -43,6 +44,21 @@ function harness(overrides: Partial<RouteDeps> = {}): Harness {
   };
   const defaults: RouteDeps = {
     auth: AUTH,
+    config: () =>
+      loadConfig({
+        ALIYUN_ACCESS_KEY_ID: "secret-access-id",
+        ALIYUN_ACCESS_KEY_SECRET: "secret-access-key",
+        ADMIN_TOKEN: "tok123",
+        WEBHOOK_URL: "https://hooks.example/private-path?token=secret-url-token",
+        WEBHOOK_TOKEN: "secret-webhook-token",
+        REGION_ID: "cn-hongkong",
+        ECS_INSTANCE_ID: "i-0123456789abcdef0",
+        TRAFFIC_THRESHOLD_GB: "42.5",
+        CDT_ENDPOINT: "cdt.example.aliyun.com",
+        BUSINESS_REGION_ID: "cn-hongkong",
+        SIGNATURE_VERSION: "v2",
+        STOPPED_MODE: "StopCharging",
+      }),
     dashboard: () => {
       counts.dashboard += 1;
       return Promise.resolve({ body: "<html>dashboard</html>" });
@@ -102,6 +118,7 @@ describe("route — public surface", () => {
 describe("route — protected routes require authentication", () => {
   const protectedRoutes: readonly (readonly [string, string])[] = [
     ["GET", "/"],
+    ["GET", "/?action=get_config"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
   ];
@@ -230,7 +247,6 @@ describe("route — dispatch with valid credentials", () => {
       "check_init",
       "setup",
       "control_instance",
-      "get_config",
       "save_config",
       "send_test_email",
       "send_test_telegram",
@@ -273,17 +289,99 @@ describe("route — dispatch with valid credentials", () => {
     }
   });
 
-  it("does not serve dashboard HTML for unsupported donor actions", async () => {
+  it("returns only the allowlisted config fields and secret-presence booleans", async () => {
     const { deps, counts } = harness();
     const result = await route(
       request("GET", "/?action=get_config", basic("admin", "tok123")),
       deps,
     );
 
-    expect(result.status).toBe(501);
+    expect(result.status).toBe(200);
     expect(result.headers["content-type"]).toContain("application/json");
-    expect(result.body).not.toContain("<html>");
+    expect(result.headers["cache-control"]).toBe("no-store");
+    const body = JSON.parse(result.body) as {
+      success: boolean;
+      mutation: boolean;
+      data: Record<string, unknown>;
+    };
+    expect(body).toEqual({
+      success: true,
+      mutation: false,
+      data: {
+        REGION_ID: "cn-hongkong",
+        ECS_INSTANCE_ID: "i-0123456789abcdef0",
+        TRAFFIC_THRESHOLD_GB: 42.5,
+        CDT_ENDPOINT: "cdt.example.aliyun.com",
+        BUSINESS_REGION_ID: "cn-hongkong",
+        SIGNATURE_VERSION: "v2",
+        STOPPED_MODE: "StopCharging",
+        webhook_url_configured: true,
+        webhook_token_configured: true,
+        admin_token_configured: true,
+        aliyun_credentials_configured: true,
+      },
+    });
+    expect(Object.keys(body.data).sort()).toEqual(
+      [
+        "BUSINESS_REGION_ID",
+        "CDT_ENDPOINT",
+        "ECS_INSTANCE_ID",
+        "REGION_ID",
+        "SIGNATURE_VERSION",
+        "STOPPED_MODE",
+        "TRAFFIC_THRESHOLD_GB",
+        "admin_token_configured",
+        "aliyun_credentials_configured",
+        "webhook_token_configured",
+        "webhook_url_configured",
+      ].sort(),
+    );
+    for (const secret of [
+      "secret-access-id",
+      "secret-access-key",
+      "secret-url-token",
+      "secret-webhook-token",
+      "tok123",
+      "https://hooks.example/private-path?token=",
+    ])
+      expect(result.body).not.toContain(secret);
     expect(counts.dashboard).toBe(0);
+  });
+
+  it("returns null for an unset business region and false secret presence flags", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+        }),
+    });
+    const result = await route(request("GET", "/?action=get_config", "Bearer tok123"), deps);
+    const data = (JSON.parse(result.body) as { data: Record<string, unknown> }).data;
+    expect(result.status).toBe(200);
+    expect(data.BUSINESS_REGION_ID).toBeNull();
+    expect(data.webhook_url_configured).toBe(false);
+    expect(data.webhook_token_configured).toBe(false);
+    expect(data.admin_token_configured).toBe(false);
+    expect(data.aliyun_credentials_configured).toBe(true);
+  });
+
+  it("keeps save_config fail-closed with the backend unavailable contract", async () => {
+    const { deps } = harness();
+    const result = await route(
+      request("POST", "/?action=save_config", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toMatchObject({
+      action: "save_config",
+      success: false,
+      available: false,
+      mutation: false,
+      code: "BACKEND_NOT_AVAILABLE",
+    });
   });
 
   it("keeps authentication as the gate for donor login and never echoes credentials", async () => {
@@ -524,7 +622,7 @@ describe("route — no mutating route exists (SPEC §8.5, A6)", () => {
     // Structural guarantee: `RouteDeps` has no `startInstance`/`stopInstance`
     // seam, so a future handler cannot reach one by accident.
     const { deps } = harness();
-    expect(Object.keys(deps).sort()).toEqual(["auth", "dashboard", "history", "query"]);
+    expect(Object.keys(deps).sort()).toEqual(["auth", "config", "dashboard", "history", "query"]);
     expect(deps).not.toHaveProperty("startInstance");
     expect(deps).not.toHaveProperty("stopInstance");
   });

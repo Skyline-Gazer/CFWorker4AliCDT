@@ -272,6 +272,7 @@ export default {
 
     const result = await route(request, {
       auth,
+      config: () => loadConfig(env),
       dashboard: async () => {
         if (env.ASSETS === undefined) {
           return { body: renderDashboard({ latest: undefined, history: [] }) };

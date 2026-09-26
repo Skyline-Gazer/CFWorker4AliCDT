@@ -7,6 +7,47 @@
  */
 
 import type { HistoryRow } from "../storage/read";
+import type { Config } from "../config";
+
+/** Explicit allowlist for the authenticated donor config read response. */
+export interface DonorConfigResponse {
+  readonly success: true;
+  readonly mutation: false;
+  readonly data: {
+    readonly REGION_ID: string;
+    readonly ECS_INSTANCE_ID: string;
+    readonly TRAFFIC_THRESHOLD_GB: number;
+    readonly CDT_ENDPOINT: string;
+    readonly BUSINESS_REGION_ID: string | null;
+    readonly SIGNATURE_VERSION: string;
+    readonly STOPPED_MODE: string;
+    readonly webhook_url_configured: boolean;
+    readonly webhook_token_configured: boolean;
+    readonly admin_token_configured: boolean;
+    readonly aliyun_credentials_configured: boolean;
+  };
+}
+
+/** Project validated config into donor-compatible fields without exposing secrets. */
+export function adaptDonorConfig(config: Config): DonorConfigResponse {
+  return {
+    success: true,
+    mutation: false,
+    data: {
+      REGION_ID: config.regionId,
+      ECS_INSTANCE_ID: config.ecsInstanceId,
+      TRAFFIC_THRESHOLD_GB: config.trafficThresholdGB,
+      CDT_ENDPOINT: config.cdtEndpoint,
+      BUSINESS_REGION_ID: config.businessRegionId ?? null,
+      SIGNATURE_VERSION: config.signatureVersion,
+      STOPPED_MODE: config.stoppedMode,
+      webhook_url_configured: config.webhookUrl !== undefined,
+      webhook_token_configured: config.webhookToken !== undefined,
+      admin_token_configured: config.adminToken !== undefined,
+      aliyun_credentials_configured: config.accessKeyId !== "" && config.accessKeySecret !== "",
+    },
+  };
+}
 
 export interface DonorRegionTraffic {
   readonly businessRegionId: string | null;
@@ -215,7 +256,6 @@ const ACTION_CODES: ReadonlyMap<string, DonorActionCode> = new Map([
   ["check_init", "BACKEND_NOT_AVAILABLE"],
   ["setup", "BACKEND_NOT_AVAILABLE"],
   ["control_instance", "FEATURE_NOT_IMPLEMENTED"],
-  ["get_config", "BACKEND_NOT_AVAILABLE"],
   ["save_config", "BACKEND_NOT_AVAILABLE"],
   ["send_test_email", "BACKEND_NOT_AVAILABLE"],
   ["send_test_telegram", "BACKEND_NOT_AVAILABLE"],
