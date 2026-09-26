@@ -163,10 +163,15 @@ to D1 is redacted more than once.
 ## Deployment shape
 
 - `wrangler.jsonc` is the source of truth, and is never mutated by a deployment.
-- Cron `*/10 * * * *`, UTC, 5-field — **enabled by RELEASE only**.
-- The first deployment is two owner actions. PRE-FLIGHT creates the Worker with
+- Cron `*/10 * * * *`, UTC, 5-field — RELEASE enables it after first-deploy
+  read-only verification; UPDATE explicitly preserves that schedule on an existing
+  Worker.
+- The first deployment is two owner actions. PRE-FLIGHT creates a new Worker with
   `triggers.crons = []` and a Version URL; verification is read-only against that
-  URL; RELEASE restores Cron and the chosen HTTP endpoint. Nothing chains them.
+  URL; RELEASE enables Cron and the chosen HTTP endpoint. PRE-FLIGHT must never run
+  against the live Cron Worker because its empty Cron array removes the schedule.
+- Normal production re-deployments use UPDATE, which keeps the selected HTTP
+  exposure and Cron schedule while applying pending D1 migrations before code.
 - HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`) with
   no default. `workers_dev: false` plus no route means the production dashboard has
   no stable endpoint until that choice is made.
@@ -174,7 +179,7 @@ to D1 is redacted more than once.
   than at the first scheduled run.
 - The D1 binding is declared without a `database_id`; a real identifier is supplied at
   deploy time and never committed. The generated configs
-  (`wrangler.preflight.jsonc`, `wrangler.deploy.jsonc`) live at the repository root
+  (`wrangler.preflight.jsonc`, `wrangler.deploy.jsonc`, `wrangler.update.jsonc`) live at the repository root
   — Wrangler resolves `main` relative to the config's directory — and are gitignored.
 - CI holds no credentials and performs no deployment.
 

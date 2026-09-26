@@ -42,7 +42,7 @@
 | Revision branch | `docs/web-d1-architecture-revision` |
 | Companion spec | [`project-spec.md`](./project-spec.md) |
 | Implementation state at revision | P0 **merged** (`c6380e4`); P1 open (PR #35); P2/P3 open (PR #37) |
-| Deployment state | **None.** No Worker has been deployed. No live Alibaba Cloud call has been made. |
+| Deployment state | Last production RELEASE: `106f4d214a883ac9bfdf0798110f845092fbe971`; current `main` is held and not deployed. |
 
 ## 2. Architecture delta (Revision 1 → Revision 2)
 
@@ -661,25 +661,28 @@ assertions are prohibited (debt D2). No unit or CI test may make a live ECS muta
     URL for read-only live verification and no stable endpoint. Cloudflare documents
     that an empty `crons` array *removes* Cron Triggers whereas an omitted field
     leaves existing ones in place, so the field is written explicitly.
-  - **RELEASE** is a separate, explicitly authorized dispatch that restores Cron and
-    applies the owner's HTTP exposure choice. It is never triggered by PRE-FLIGHT.
+  - **RELEASE** is a separate, explicitly authorized dispatch that enables Cron for
+    the first time after live read-only verification and applies the owner's HTTP
+    exposure choice. It is never triggered by PRE-FLIGHT.
   - The preflight config also declares `secrets: { required: [] }`, because Wrangler
     refuses to deploy a new Worker that declares required secrets it cannot yet hold
     ("This Worker does not exist yet, so secrets cannot be set in advance"). RELEASE
     restores the full list, so the fail-loudly-on-a-missing-secret guarantee applies
-    from the first release onward. A dry-run does not surface this constraint.
+    from the first release onward. UPDATE retains that list for normal deployments.
+    A dry-run does not surface this constraint.
   - This replaces the earlier flow of `wrangler versions upload` → verify →
     `versions deploy`, which cannot work for the first Worker upload: Cloudflare
     documents that `wrangler versions upload` fails the first time a new Worker is
-    uploaded. It becomes useful only *after* a Worker exists; no update workflow that
-    uses it is implemented yet.
+    uploaded. Normal deployments after the Worker exists use the owner-gated UPDATE
+    workflow, which applies pending migrations before deployment and keeps the known
+    production Cron and HTTP exposure.
 - **HTTP exposure is an explicit owner choice**, not an inferred one:
   `HTTP_EXPOSURE_MODE` is `workers_dev` or `custom_domain`, with no default, and the
   resolver fails closed when it is absent, unrecognised, or `custom_domain` without a
   well-formed `WORKER_CUSTOM_DOMAIN`. These are deployment-only values, not Worker
   runtime variables, and are deliberately not added to the SPEC's seven.
 - **Application runtime configuration is injected by the resolver, from one
-  boundary, for both modes.** `REGION_ID` and `ECS_INSTANCE_ID` are required
+  boundary, for every deployment mode.** `REGION_ID` and `ECS_INSTANCE_ID` are required
   repository *variables*; the resolver fails **before generating** when either is
   absent, because a deploy that omitted them would succeed and then fail
   `loadConfig()` on every request — a state a Wrangler dry-run cannot detect. The

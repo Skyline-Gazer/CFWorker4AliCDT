@@ -140,6 +140,11 @@ function releaseEnv(extra: Record<string, string> = {}): Record<string, string> 
   };
 }
 
+/** The mode-specific arguments for an existing-Worker update. */
+function updateEnv(extra: Record<string, string> = {}): Record<string, string> {
+  return releaseEnv(extra);
+}
+
 /** Every scratch config this file wrote, so cleanup never touches anything else. */
 function listScratchFiles(): string[] {
   return readdirSync(REPO_ROOT)
@@ -327,6 +332,115 @@ describe("RELEASE generation — Cron authority", () => {
   });
 });
 
+describe("UPDATE generation — existing Worker state is retained", () => {
+  it("writes the generated config to the repository root by default", () => {
+    const path = join(REPO_ROOT, "wrangler.update.jsonc");
+    const result = resolve("update", updateEnv());
+    expect(result.status).toBe(0);
+    expect(existsSync(path)).toBe(true);
+    rmSync(path, { force: true });
+  });
+
+  it("always writes the production Cron expression, never an empty array", () => {
+    const { path } = generate("update", updateEnv(), "update-cron");
+    const triggers = readGenerated(path).triggers as { crons?: unknown };
+    expect(triggers.crons).toEqual(["*/10 * * * *"]);
+    expect(triggers.crons).not.toEqual([]);
+  });
+
+  it("retains the committed required Worker Secret names", () => {
+    const { path } = generate("update", updateEnv(), "update-secrets");
+    const secrets = readGenerated(path).secrets as { required?: string[] } | undefined;
+    expect(secrets?.required).toEqual([
+      "ALIYUN_ACCESS_KEY_ID",
+      "ALIYUN_ACCESS_KEY_SECRET",
+      "ADMIN_TOKEN",
+    ]);
+  });
+
+  it("injects the remote D1 identifier into TRAFFIC_DB", () => {
+    const { path } = generate("update", updateEnv(), "update-d1-id");
+    const databases = readGenerated(path).d1_databases as {
+      binding: string;
+      database_id?: string;
+    }[];
+    expect(databases.find((entry) => entry.binding === "TRAFFIC_DB")?.database_id).toBe(
+      FAKE_DATABASE_ID,
+    );
+  });
+
+  it("uses existing-Worker exposure settings without preview URLs", () => {
+    const { path } = generate("update", updateEnv(), "update-exposure");
+    const config = readGenerated(path);
+    expect(config.workers_dev).toBe(true);
+    expect(config.routes).toBeUndefined();
+    expect(config.preview_urls).toBe(false);
+  });
+
+  it("declares the selected custom-domain route", () => {
+    const { path } = generate(
+      "update",
+      updateEnv({
+        HTTP_EXPOSURE_MODE: "custom_domain",
+        WORKER_CUSTOM_DOMAIN: "worker.example.com",
+      }),
+      "update-custom-domain",
+    );
+    const config = readGenerated(path);
+    expect(config.workers_dev).toBe(false);
+    expect(config.routes).toEqual([{ pattern: "worker.example.com", custom_domain: true }]);
+  });
+
+  it("omits custom CPU limits on Workers Free", () => {
+    const { path } = generate("update", updateEnv(), "update-cpu-limit");
+    expect(readGenerated(path).limits).toBeUndefined();
+  });
+
+  it("fails closed when the HTTP exposure decision is absent or invalid", () => {
+    for (const [label, env] of [
+      ["absent", { D1_DATABASE_ID: FAKE_DATABASE_ID, ...RUNTIME_VARS }],
+      ["blank", updateEnv({ HTTP_EXPOSURE_MODE: "   " })],
+      ["invalid", updateEnv({ HTTP_EXPOSURE_MODE: "public" })],
+    ] as const) {
+      const { result, path } = generate("update", env, `update-exposure-${label}`);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("HTTP_EXPOSURE_MODE");
+      expect(existsSync(path)).toBe(false);
+    }
+  });
+
+  it("fails closed when custom_domain has no domain", () => {
+    const { result, path } = generate(
+      "update",
+      updateEnv({ HTTP_EXPOSURE_MODE: "custom_domain" }),
+      "update-no-domain",
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("WORKER_CUSTOM_DOMAIN");
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("fails closed on a malformed custom domain", () => {
+    const { result, path } = generate(
+      "update",
+      updateEnv({
+        HTTP_EXPOSURE_MODE: "custom_domain",
+        WORKER_CUSTOM_DOMAIN: "https://worker.example.com",
+      }),
+      "update-malformed-domain",
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("WORKER_CUSTOM_DOMAIN");
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("keeps the committed source config byte-identical", () => {
+    const before = readFileSync(SOURCE_CONFIG, "utf8");
+    generate("update", updateEnv(), "update-stable");
+    expect(readFileSync(SOURCE_CONFIG, "utf8")).toBe(before);
+  });
+});
+
 describe("RELEASE generation — HTTP exposure is an explicit owner choice", () => {
   it("fails closed when HTTP_EXPOSURE_MODE is absent", () => {
     const { result, path } = generate(
@@ -462,6 +576,13 @@ describe("application runtime configuration is injected into every mode", () => 
 
   it("injects REGION_ID and ECS_INSTANCE_ID into the release config", () => {
     const { path } = generate("release", releaseEnv(), "app-region-rel");
+    const vars = varsOf(path);
+    expect(vars.REGION_ID).toBe(RUNTIME_VARS.REGION_ID);
+    expect(vars.ECS_INSTANCE_ID).toBe(RUNTIME_VARS.ECS_INSTANCE_ID);
+  });
+
+  it("injects REGION_ID and ECS_INSTANCE_ID into the update config", () => {
+    const { path } = generate("update", updateEnv(), "app-region-update");
     const vars = varsOf(path);
     expect(vars.REGION_ID).toBe(RUNTIME_VARS.REGION_ID);
     expect(vars.ECS_INSTANCE_ID).toBe(RUNTIME_VARS.ECS_INSTANCE_ID);
@@ -620,6 +741,20 @@ describe("required application variables fail closed", () => {
       expect(result.status).not.toBe(0);
       expect(existsSync(path)).toBe(false);
     });
+
+    it(`update fails and produces no artifact when ${label}`, () => {
+      const { result, path } = generate(
+        "update",
+        {
+          D1_DATABASE_ID: FAKE_DATABASE_ID,
+          HTTP_EXPOSURE_MODE: "workers_dev",
+          ...env,
+        },
+        "app-missing-update",
+      );
+      expect(result.status).not.toBe(0);
+      expect(existsSync(path)).toBe(false);
+    });
   }
 
   it("names the missing binding without printing any value", () => {
@@ -661,7 +796,7 @@ describe("deployment mode must not change application configuration", () => {
   // configuration must not. If it did, the verified preflight behaviour would
   // stop describing what RELEASE actually runs.
 
-  it("derives identical application vars from both modes for identical inputs", () => {
+  it("derives identical application vars from every mode for identical inputs", () => {
     const inputs = {
       D1_DATABASE_ID: FAKE_DATABASE_ID,
       REGION_ID: "cn-hongkong",
@@ -678,8 +813,41 @@ describe("deployment mode must not change application configuration", () => {
       { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" },
       "parity-rel",
     );
+    const update = generate(
+      "update",
+      { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" },
+      "parity-update",
+    );
 
     expect(varsOf(preflight.path)).toEqual(varsOf(release.path));
+    expect(varsOf(release.path)).toEqual(varsOf(update.path));
+  });
+
+  it("UPDATE and RELEASE have the same runtime vars for either HTTP exposure", () => {
+    const inputs = {
+      D1_DATABASE_ID: FAKE_DATABASE_ID,
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-parity-exposure",
+    };
+    const release = generate(
+      "release",
+      {
+        ...inputs,
+        HTTP_EXPOSURE_MODE: "custom_domain",
+        WORKER_CUSTOM_DOMAIN: "worker.example.com",
+      },
+      "parity-release-domain",
+    );
+    const update = generate(
+      "update",
+      {
+        ...inputs,
+        HTTP_EXPOSURE_MODE: "custom_domain",
+        WORKER_CUSTOM_DOMAIN: "worker.example.com",
+      },
+      "parity-update-domain",
+    );
+    expect(varsOf(release.path)).toEqual(varsOf(update.path));
   });
 
   it("keeps application vars equal even when the release exposure mode differs", () => {
@@ -705,7 +873,7 @@ describe("deployment mode must not change application configuration", () => {
     expect(varsOf(workersDev.path)).toEqual(varsOf(customDomain.path));
   });
 
-  it("differs between modes only in the documented mode-specific properties", () => {
+  it("differs between PRE-FLIGHT and existing-Worker modes only in documented properties", () => {
     const inputs = {
       D1_DATABASE_ID: FAKE_DATABASE_ID,
       REGION_ID: "cn-hongkong",
@@ -714,6 +882,10 @@ describe("deployment mode must not change application configuration", () => {
     const preflight = readGenerated(generate("preflight", inputs, "parity-diff-pf").path);
     const release = readGenerated(
       generate("release", { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" }, "parity-diff-rel").path,
+    );
+    const update = readGenerated(
+      generate("update", { ...inputs, HTTP_EXPOSURE_MODE: "workers_dev" }, "parity-diff-update")
+        .path,
     );
 
     const differingKeys = Object.keys({ ...preflight, ...release }).filter(
@@ -726,18 +898,32 @@ describe("deployment mode must not change application configuration", () => {
       "triggers",
       "workers_dev",
     ]);
+    expect(update).toEqual(release);
+
+    const preflightCrons = (preflight.triggers as { crons?: unknown[] }).crons;
+    const updateCrons = (update.triggers as { crons?: unknown[] }).crons;
+    expect(preflightCrons).toEqual([]);
+    expect(updateCrons).toEqual(["*/10 * * * *"]);
+    expect((preflight.secrets as { required?: string[] }).required).toEqual([]);
+    expect((update.secrets as { required?: string[] }).required).toContain("ADMIN_TOKEN");
+    expect(preflight.preview_urls).toBe(true);
+    expect(update.preview_urls).toBe(false);
+    expect(preflight.workers_dev).toBe(false);
+    expect(update.workers_dev).toBe(true);
   });
 });
 
 describe("generated files never enter the tracked tree", () => {
-  it("gitignores both default generated configs", () => {
+  it("gitignores all three default generated configs", () => {
     expect(ignoreStatus("wrangler.preflight.jsonc")).toBe(0);
     expect(ignoreStatus("wrangler.deploy.jsonc")).toBe(0);
+    expect(ignoreStatus("wrangler.update.jsonc")).toBe(0);
   });
 
   it("tracks neither generated config", () => {
     expect(isTracked("wrangler.preflight.jsonc")).toBe(false);
     expect(isTracked("wrangler.deploy.jsonc")).toBe(false);
+    expect(isTracked("wrangler.update.jsonc")).toBe(false);
   });
 
   it("gitignores the scratch directory used by these tests", () => {

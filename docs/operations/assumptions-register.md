@@ -124,8 +124,8 @@ config file's *directory* as the project root, so `main` resolves relative to th
 config's location. A generated config written outside the repository root fails
 with "The entry-point file at `src/index.ts` was not found" — measured, not
 assumed, and the defect that PR #66 fixed.
-What *is* verified: both generated configs (`wrangler.preflight.jsonc` and
-`wrangler.deploy.jsonc`) are accepted by `wrangler deploy --dry-run` **against
+What *is* verified: all three generated configs (`wrangler.preflight.jsonc`,
+`wrangler.deploy.jsonc`, and `wrangler.update.jsonc`) are accepted by `wrangler deploy --dry-run` **against
 those exact files**, resolving the entry point, the `TRAFFIC_DB` binding with the
 injected id, and the config schema. That is asserted in
 `test/deploy/artifact-dryrun.test.ts`, because a validation against `wrangler.jsonc`
@@ -192,7 +192,7 @@ If wrong: the first deployment fails, loudly, before any Worker runs. It fails
 **closed**, and the remedy is to scaffold the Worker another way or pass secrets on
 the command line — neither of which is wanted.
 In the meantime: the PRE-FLIGHT generated config declares `secrets: { required: [] }`,
-so the first deploy can succeed; **RELEASE requires exactly the Alibaba AccessKey ID,
+so the first deploy can succeed; **RELEASE and UPDATE require exactly the Alibaba AccessKey ID,
 Alibaba AccessKey secret, and `ADMIN_TOKEN`**, so a missing required secret still
 fails deployment loudly. Webhook secrets are optional. Note that
 `wrangler deploy --dry-run` does **not** surface this, because validation runs on
@@ -211,8 +211,8 @@ accepted, with a negative control proving the check has teeth.
 If wrong: the Worker deploys and is then permanently non-functional until
 redeployed — the failure mode this guard exists to prevent.
 In the meantime: the resolver fails **before generating** when either is absent or
-whitespace-only, in both modes, naming the binding and never printing a value. It
-injects application variables from one boundary for both modes, so a change of
+whitespace-only, in all three modes, naming the binding and never printing a value. It
+injects application variables from one boundary for every mode, so a change of
 deployment mode cannot silently change the region, instance, threshold, endpoint,
 business-region selection, signature version, or stopped mode.
 

@@ -42,7 +42,7 @@ function reportMissing(missingNames, reason) {
     "Never put ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET, or ADMIN_TOKEN in Wrangler vars, GitHub Variables, or Cloudflare Dashboard plaintext vars.",
   );
   console.error(
-    "PRE-FLIGHT and RELEASE deploy generated vars configs; Dashboard plaintext vars absent from the generated config are removed on deploy.",
+    "PRE-FLIGHT, RELEASE, and UPDATE deploy generated vars configs; Dashboard plaintext vars absent from the generated config are removed on deploy.",
   );
   console.error(
     "If ALIYUN_ACCESS_KEY_ID was ever present in Actions logs, rotate the Alibaba AccessKey.",

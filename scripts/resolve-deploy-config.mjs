@@ -19,20 +19,23 @@
 // **deployment-mode specific**, and writes a generated file that is gitignored.
 // It never mutates the committed config.
 //
-// WHY ONE SCRIPT AND TWO MODES
+// WHY ONE SCRIPT AND THREE MODES
 //
-// The first real deployment is two separate owner actions, and they differ in
-// exactly one dangerous respect: whether scheduled mutation authority exists.
+// The first real deployment is two separate owner actions: PRE-FLIGHT creates
+// the Worker without scheduled authority, then RELEASE enables Cron after the
+// live read-only verification. UPDATE is a separate path for an existing Worker.
 //
 //   --mode preflight  Creates the Worker for the first time with Cron explicitly
 //                     disabled, so the live read-only verification can happen
 //                     BEFORE anything can start or stop an instance.
 //   --mode release    Restores the production Cron and applies the owner's
 //                     explicit HTTP exposure choice.
+//   --mode update     Updates an existing Worker while retaining its production
+//                     Cron, HTTP exposure, and required-secret declaration.
 //
-// Both modes are branches of one function rather than two scripts, because two
+// All modes are branches of one function rather than separate scripts, because
 // scripts would drift: a fix to the D1 injection or the root-path guard would
-// have to be made twice, and the second copy would be the one that is wrong.
+// have to be repeated and could be missed by one deployment path.
 //
 // WHY THE OUTPUT PATH MATTERS
 //
@@ -48,7 +51,7 @@
 // Nothing here prints a value from the environment: the resolved database id is an
 // infrastructure identifier and this output goes to CI logs.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,7 +64,9 @@ function parseJsonc(text) {
 }
 
 function fail(message) {
-  process.stderr.write(`${message}\n`);
+  // `fail()` is called by the CLI, including under spawnSync in the test suite.
+  // Write synchronously so the diagnostic is not lost when the process exits.
+  writeSync(2, `${message}\n`);
   process.exit(1);
 }
 
@@ -72,13 +77,14 @@ const sourcePath = resolve(repoRoot, "wrangler.jsonc");
 /**
  * The authoritative production Cron expression (SPEC §11).
  *
- * It appears here, in the release mode only, so that "which mode enables
- * scheduled mutation" is answered by reading one line of one file.
+ * RELEASE uses this to enable scheduled mutation after first-deploy verification.
+ * UPDATE carries the same expression because the existing Worker must retain it.
+ * PRE-FLIGHT deliberately uses an empty array and is only for first deploys.
  */
 const PRODUCTION_CRONS = ["*/10 * * * *"];
 
 /** The deployment modes. Anything else is a mistake, not a default. */
-const MODES = ["preflight", "release"];
+const MODES = ["preflight", "release", "update"];
 
 /**
  * Application runtime variables that MUST be present in a generated config.
@@ -177,7 +183,7 @@ function injectDatabaseId(binding) {
 /**
  * Inject the application runtime configuration into `vars`.
  *
- * Both modes call this, so a change of deployment mode cannot silently change what
+ * Every mode calls this, so a change of deployment mode cannot silently change what
  * the Worker is configured to do. Mode-specific properties (Cron, preview URL,
  * workers.dev vs custom domain, the required-secret declaration) are the only
  * things a mode may alter.
@@ -261,19 +267,19 @@ function applyPreflight(config) {
 }
 
 /**
- * Apply the RELEASE differences.
+ * Apply the owner's HTTP exposure decision for RELEASE or UPDATE.
  *
  * Fails closed on the HTTP exposure decision: an absent or unrecognised value is
  * an error, because the effective alternative is an implicit choice the owner did
  * not make.
  */
-function applyRelease(config) {
+function applyHttpExposure(config, mode) {
   const exposureMode = process.env.HTTP_EXPOSURE_MODE;
   const candidates = EXPOSURE_MODES.join(", ");
 
   if (!present(exposureMode)) {
     fail(
-      "HTTP_EXPOSURE_MODE is required for a release and must be non-empty.\n" +
+      `HTTP_EXPOSURE_MODE is required for ${mode} and must be non-empty.\n` +
         `Expected one of: ${candidates}. There is no default: how the dashboard\n` +
         "is reachable is an explicit deployment choice, not an inferred one.",
     );
@@ -281,13 +287,6 @@ function applyRelease(config) {
   if (!EXPOSURE_MODES.includes(exposureMode)) {
     fail(`HTTP_EXPOSURE_MODE must be one of: ${candidates}. Received an unrecognised value.`);
   }
-
-  // The authoritative production Cron is restored here, and only here.
-  config.triggers = { crons: [...PRODUCTION_CRONS] };
-
-  // The Version URL exists for controlled live verification. Once a stable
-  // endpoint is explicit, retaining the temporary preview exposure is not needed.
-  config.preview_urls = false;
 
   if (exposureMode === "workers_dev") {
     config.workers_dev = true;
@@ -316,24 +315,51 @@ function applyRelease(config) {
   config.routes = [{ pattern: trimmed, custom_domain: true }];
 }
 
+/** Apply the RELEASE differences: first Cron enable plus explicit HTTP exposure. */
+function applyRelease(config) {
+  config.triggers = { crons: [...PRODUCTION_CRONS] };
+  config.preview_urls = false;
+  applyHttpExposure(config, "release");
+}
+
+/**
+ * Apply the UPDATE differences for an existing Worker.
+ *
+ * The owner confirms the Worker and live Cron already exist before this mode can
+ * run. Carrying the exact production expression in the generated config prevents
+ * a normal update from clearing or changing that schedule. `secrets.required` is
+ * inherited from wrangler.jsonc, as it is on RELEASE.
+ */
+function applyUpdate(config) {
+  config.triggers = { crons: [...PRODUCTION_CRONS] };
+  config.preview_urls = false;
+  applyHttpExposure(config, "update");
+}
+
 const mode = parseArguments(process.argv.slice(2));
 
 const { config, binding } = readSourceConfig();
 injectDatabaseId(binding);
-// Application configuration is injected for BOTH modes, from this one boundary,
+// Application configuration is injected for ALL modes, from this one boundary,
 // so a mode can never silently change what the Worker is configured to do.
 injectApplicationVars(config);
 applyFreePlanConstraints(config);
 
 if (mode === "preflight") {
   applyPreflight(config);
-} else {
+} else if (mode === "release") {
   applyRelease(config);
+} else {
+  applyUpdate(config);
 }
 
 const defaultOutput = resolve(
   repoRoot,
-  mode === "preflight" ? "wrangler.preflight.jsonc" : "wrangler.deploy.jsonc",
+  mode === "preflight"
+    ? "wrangler.preflight.jsonc"
+    : mode === "release"
+      ? "wrangler.deploy.jsonc"
+      : "wrangler.update.jsonc",
 );
 const outputPath = process.env.DEPLOY_CONFIG_PATH ?? defaultOutput;
 

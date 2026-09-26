@@ -1,26 +1,26 @@
 # Deployment and operations
 
-Deployment is **manual, owner-gated, and two-stage**. No CI job deploys, and no
-scheduled ECS mutation occurs without explicit owner authorization.
+Deployment is **manual and owner-gated**. No CI job deploys, and no scheduled ECS
+mutation occurs without explicit owner authorization.
 
 > **No credential value is ever printed, echoed, pasted into an issue, written to
 > a log, or committed.** Every command below either prompts for a value or
 > references one by name. If you find yourself typing a secret as a command
 > argument, stop — the argument is recorded in shell history.
 
-## 0. The two deployment models
+## 0. Initial deployment and normal updates
 
 It is worth being explicit about the difference, because conflating them is what
 made the earlier single-stage design unsafe.
 
-| | **Initial bootstrap** | **Normal production operation** |
+| | **Initial bootstrap** | **Existing-Worker update** |
 | --- | --- | --- |
-| Frequency | Once, for a new Worker | Re-deployments of an existing Worker |
-| Cron authority | **Disabled** (`triggers.crons = []`) | Enabled (`*/10 * * * *`) |
-| HTTP endpoint | Version URL only, temporary | Stable endpoint, deliberately chosen |
-| Verification | Read-only, live, **this is the point** | Regression checks on the change |
-| Workflows | `preflight.yml` | `release.yml` |
-| Config | `wrangler.preflight.jsonc` | `wrangler.deploy.jsonc` |
+| Frequency | Once, for a new Worker | Normal production re-deployments |
+| Cron authority | PRE-FLIGHT disables it; RELEASE enables `*/10 * * * *` after live verification | Preserved at `*/10 * * * *` |
+| HTTP endpoint | Version URL during verification, then explicit owner choice | Existing exposure is explicitly redeclared |
+| Verification | Read-only, live, before first Cron enable | Regression checks, then console and health checks |
+| Workflows | `preflight.yml`, then `release.yml` | `update.yml` |
+| Config | `wrangler.preflight.jsonc`, then `wrangler.deploy.jsonc` | `wrangler.update.jsonc` |
 
 The bootstrap is two owner actions, not one:
 
@@ -32,16 +32,20 @@ preflight deploy  →  Version URL  →  read-only live verification  →  owner
                                                           (stable endpoint + Cron)
 ```
 
-**RELEASE is never triggered by PRE-FLIGHT.** Nothing chains them. The owner
-dispatches each deliberately.
+**PRE-FLIGHT is first-deploy only. Never run it against a Worker with live Cron.**
+Its generated config writes `triggers.crons = []`, which removes every Cron
+Trigger on that Worker. RELEASE is the separate first-Cron-enable action after
+live read-only verification. Normal re-deployments use UPDATE, whose config keeps
+the production schedule at `*/10 * * * *`.
 
 ### Why the bootstrap cannot use `wrangler versions upload`
 
 Cloudflare documents that `wrangler versions upload` **cannot be used for the
 first upload of a new Worker project**; the command fails. The first upload must be
-`wrangler deploy` (or C3). `wrangler versions upload` becomes useful *after* a
-Worker already exists, and is where a future update workflow would start — but no
-such workflow is implemented here, and this document does not claim one.
+`wrangler deploy` (or C3). Once the Worker exists, `update.yml` is the normal
+owner-gated path for an application update. It applies pending migrations before
+deploying code, keeps the known Cron schedule and HTTP exposure, and checks the
+required Worker Secret names after deployment.
 
 So the safe bootstrap is a **real first deploy whose config has Cron explicitly
 disabled**. That is what makes it safe: the Worker exists, the code is real, and
@@ -70,7 +74,7 @@ never routed through GitHub.
 
 ### Deployment trust boundary
 
-Both `preflight.yml` and `release.yml` target the `production` GitHub Environment.
+All deployment workflows target the `production` GitHub Environment.
 The owner must configure that Environment with **required reviewers enabled** and
 deployment branches/tags **restricted to `main` only**. These are mandatory
 security settings, not optional hardening.
@@ -79,9 +83,9 @@ Store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as **secrets on the
 `production` Environment**, not as repository secrets. Keep `REGION_ID`,
 `ECS_INSTANCE_ID`, `D1_DATABASE_ID`, and the optional application overrides as
 repository Variables; `WORKER_CUSTOM_DOMAIN` may also remain a repository
-Variable. `HTTP_EXPOSURE_MODE` remains an explicit RELEASE input.
+Variable. `HTTP_EXPOSURE_MODE` remains an explicit RELEASE and UPDATE input.
 
-Both workflows also reject refs other than `refs/heads/main` before checkout or
+All workflows also reject refs other than `refs/heads/main` before checkout or
 privileged steps. **This workflow-level ref guard is supplementary.** Workflow code
 comes from the selected ref, so the authoritative boundary is the `production`
 Environment's required reviewer, main-only deployment branch restriction, and
@@ -124,7 +128,7 @@ resolution there rather than to add hidden Dashboard state via `keep_vars`.
 
 **Credentials must stay Worker Secrets.** Never put `ALIYUN_ACCESS_KEY_ID`,
 `ALIYUN_ACCESS_KEY_SECRET`, or `ADMIN_TOKEN` in Wrangler `vars`, GitHub Variables,
-or Cloudflare Dashboard plaintext vars. PRE-FLIGHT and RELEASE deploy the generated
+or Cloudflare Dashboard plaintext vars. PRE-FLIGHT, RELEASE, and UPDATE deploy the generated
 config as the authoritative `vars` set, so a Dashboard plaintext var absent from
 that config is removed during deploy. This is how a plaintext `ALIYUN_ACCESS_KEY_ID`
 binding can be wiped; use Worker Secrets instead.
@@ -140,11 +144,11 @@ so there is exactly one implementation of each rule.
 
 | Secret | Requirement | Confirmed? |
 | --- | --- | --- |
-| `ALIYUN_ACCESS_KEY_ID` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
-| `ALIYUN_ACCESS_KEY_SECRET` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE.** Its paired secret. | ☐ |
+| `ALIYUN_ACCESS_KEY_ID` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
+| `ALIYUN_ACCESS_KEY_SECRET` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** Its paired secret. | ☐ |
 | `WEBHOOK_URL` | Optional. When set, must be absolute `https://` and enables one webhook attempt per scheduled run. | ☐ |
 | `WEBHOOK_TOKEN` | Optional with `WEBHOOK_URL`. When set, sent as `Authorization: Bearer <token>`; token alone is a config error. | ☐ |
-| `ADMIN_TOKEN` | **Required by PRE-FLIGHT's post-deploy gate and RELEASE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
+| `ADMIN_TOKEN` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
 
 ### External confirmations
 
@@ -161,7 +165,7 @@ so there is exactly one implementation of each rule.
 Set `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN` as Worker
 Secrets. PRE-FLIGHT keeps `secrets.required: []` so the first deploy can create a
 Worker, then hard-fails if `wrangler secret list` does not contain all three names.
-RELEASE also declares them in `secrets.required`. Configure `WEBHOOK_URL` and,
+RELEASE and UPDATE also declare them in `secrets.required`. Configure `WEBHOOK_URL` and,
 optionally, `WEBHOOK_TOKEN` only when notification is wanted; neither is required
 by the name gate, and `WEBHOOK_TOKEN` without `WEBHOOK_URL` is a runtime config
 error.
@@ -198,8 +202,8 @@ never copy the key value into an issue, log, chat, or repository file.
 
 ## 3. Deploying
 
-There are four paths: two workflows (the normal way) and their manual
-equivalents, for when a step needs to be visible.
+There are six documented invocations: three owner-gated workflows (the normal
+way) and their manual equivalents, for when a step needs to be visible.
 
 ### 3a. Generated configs — why they exist and where they go
 
@@ -213,8 +217,9 @@ the committed config in CI, `scripts/resolve-deploy-config.mjs` reads
 
 | Mode | Output | Purpose |
 | --- | --- | --- |
-| `--mode preflight` | `wrangler.preflight.jsonc` | First deploy; Cron disabled; Version URL. |
-| `--mode release` | `wrangler.deploy.jsonc` | Production; Cron enabled; chosen endpoint. |
+| `--mode preflight` | `wrangler.preflight.jsonc` | First deploy only; Cron disabled; Version URL. |
+| `--mode release` | `wrangler.deploy.jsonc` | First Cron enable after live verification; chosen endpoint. |
+| `--mode update` | `wrangler.update.jsonc` | Existing Worker; production Cron and selected HTTP exposure retained. |
 
 Three properties are enforced by the resolver, and each closes a measured defect:
 
@@ -225,10 +230,10 @@ Three properties are enforced by the resolver, and each closes a measured defect
    other location.
 2. **The committed `wrangler.jsonc` is never mutated.** Generation is read-and-copy.
    A config rewrite in CI is how a local config silently drifts from the deployed one.
-3. **Both generated files are gitignored**, and their names are distinct from
+3. **All generated files are gitignored**, and their names are distinct from
    `wrangler.jsonc` so Wrangler never picks one up implicitly.
 
-A fourth property is what the resolver gained for deployment readiness: **both
+A fourth property is what the resolver gained for deployment readiness: **all
 modes inject the application runtime variables from the same boundary** (§1b). A
 change of deployment mode may alter only mode-specific properties — Cron, the
 preview URL, `workers_dev` vs a custom domain, and the required-secret declaration.
@@ -245,8 +250,12 @@ config proves nothing about the one being deployed.
 `.github/workflows/preflight.yml`. It resolves `--mode preflight`, applies remote
 migrations, and performs the first `wrangler deploy`.
 
-The preflight config sets `preview_urls = true`, `workers_dev = false`, no route,
-and `triggers.crons = []`.
+PRE-FLIGHT is for a new Worker only. The preflight config sets `preview_urls =
+true`, `workers_dev = false`, no route, and `triggers.crons = []`.
+
+> **Never run PRE-FLIGHT against the live production Worker.** An empty Cron array
+> removes all Cron Triggers, so using this first-deploy workflow during normal
+> operations would remove the live `*/10 * * * *` schedule.
 
 **Why `[]` and not an omitted field.** Cloudflare documents the difference: if
 `crons` is an **empty array**, all Cron Triggers are removed; if `triggers` or
@@ -259,7 +268,7 @@ operation as "have no schedule".
 secrets — it refuses with *"This Worker does not exist yet, so secrets cannot be
 set in advance with `wrangler secret put`."* So a first deploy that declared
 `secrets.required` could never succeed. The preflight config therefore declares
-`required: []`, and **RELEASE requires exactly the two Alibaba credentials and
+`required: []`, and **RELEASE and UPDATE require exactly the two Alibaba credentials and
 `ADMIN_TOKEN`**, where the Worker exists and the fail-loudly-on-a-missing-secret
 guarantee applies. The optional webhook pair is not in `secrets.required`.
 
@@ -267,8 +276,8 @@ This is a real constraint on the bootstrap order, not a relaxed safety property:
 after deploying, PRE-FLIGHT runs `wrangler secret list --format json` through
 `scripts/assert-worker-secret-names.mjs` and fails the job unless
 `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN` are present.
-Webhook names remain optional. RELEASE also checks the names after deploy and
-declares the required names in `secrets.required`. Note also that
+Webhook names remain optional. RELEASE and UPDATE also check the names after deploy
+and declare the required names in `secrets.required`. Note also that
 `wrangler deploy --dry-run` does **not** surface `secrets.required` validation,
 because that validation runs on the real upload path — which is why it is asserted
 structurally in `test/deploy/config-resolution.test.ts`.
@@ -314,8 +323,10 @@ Then perform the read-only verification in §6 against the latest Version URL.
 GitHub secrets solely to automate preflight is a different security model; it is
 not the current one, and changing it is an owner decision, not a convenience.
 
-**Step 3 — RELEASE** (enables Cron). Dispatch `.github/workflows/release.yml`.
-This is a separate action, and the only path that enables scheduled mutation.
+**Step 3 — RELEASE** (first production Cron enable). Dispatch
+`.github/workflows/release.yml` after the live read-only verification. RELEASE
+sets the production schedule and the owner's selected HTTP endpoint. This is the
+first-enable action; subsequent application deployments use UPDATE.
 
 ### 3c. Deployment-only configuration (owner action, one time)
 
@@ -333,8 +344,8 @@ seven. See §1a for how the three classes differ.
 
 `D1_DATABASE_ID` and the application/runtime values must remain repository-level
 Variables. Cloudflare deployment credentials must be Environment-level Secrets so
-they are unavailable to jobs outside the protected deployment boundary. Both
-PRE-FLIGHT and RELEASE attach `environment: production` and receive those secrets
+they are unavailable to jobs outside the protected deployment boundary. PRE-FLIGHT,
+RELEASE, and UPDATE attach `environment: production` and receive those secrets
 only after the Environment's owner-side protections allow the job to proceed.
 
 `D1_DATABASE_ID` is a **variable, not a secret**: it is an identifier rather than a
@@ -345,7 +356,7 @@ making it safer. It is nonetheless never committed.
 assert these live settings):
 
 1. **Settings → Environments → New environment**, named exactly `production`.
-2. Enable **Required reviewers** and add the owner. This is mandatory for both
+2. Enable **Required reviewers** and add the owner. This is mandatory for all
    deployment workflows.
 3. Restrict **Deployment branches and tags** to `main` only. This is mandatory:
    the Environment is the authoritative ref boundary because workflow code comes
@@ -363,7 +374,7 @@ runtime overrides in repository Variables.
 and no routes, so the production dashboard/API has **no stable inbound endpoint**
 until the owner chooses one. That choice is explicit, and there is no default:
 
-| Mode | Generated release config | When to use |
+| Mode | Generated config | When to use |
 | --- | --- | --- |
 | `workers_dev` | `workers_dev = true`, no route | The simpler personal/hobby path. |
 | `custom_domain` | `workers_dev = false` + a `custom_domain` route | A domain you control. |
@@ -393,7 +404,45 @@ The release workflow fails closed unless **all** of these hold:
 Every confirmation is `required` with **no default**, because a defaulted boolean is
 a gate that passes when nobody looks at it.
 
-### 3e. Manual equivalents
+### 3e. Existing-Worker UPDATE
+
+Use `.github/workflows/update.yml` for normal production re-deployments after the
+Worker has been created and RELEASE has enabled its Cron. The workflow targets the
+protected `production` Environment, rejects non-`main` refs, and requires these
+dispatch inputs with no defaults:
+
+| Input | Required value | Owner confirms |
+| --- | --- | --- |
+| `confirmation` | `UPDATE` | This is an intentional production update. |
+| `EXISTING_WORKER_CONFIRMED` | `YES` | The Worker exists and Cron `*/10 * * * *` is already live. |
+| `HTTP_EXPOSURE_MODE` | `workers_dev` or `custom_domain` | The HTTP exposure to retain. For `custom_domain`, `WORKER_CUSTOM_DOMAIN` must be a valid hostname. |
+
+UPDATE does not require `LIVE_READ_ONLY_VERIFIED`; that gate belongs to the
+first-deployment RELEASE. It resolves `--mode update` into
+`wrangler.update.jsonc`, which explicitly carries Cron `*/10 * * * *`, sets the
+selected workers.dev or custom-domain exposure, disables temporary
+preview URLs, and retains `secrets.required` from `wrangler.jsonc`. The post-deploy
+gate checks the three required Worker Secret names without reading or printing
+secret values.
+
+The workflow validates the repository, checks deployment credential and variable
+presence, resolves the generated config, applies remote D1 migrations, deploys with
+that same config, and checks required secret names. D1 migrations run before the
+Worker version that needs their schema.
+
+**Migration `0002_decision_reason.sql` is additive and nullable.** It runs
+`ALTER TABLE traffic_checks ADD COLUMN decision_reason TEXT;`: there is no default
+or backfill, and existing rows remain `NULL`. Apply it to remote D1 before deploying
+Worker code that writes `decision_reason`; `update.yml` applies pending migrations
+before its deploy step.
+
+The expected post-update Cron state is exactly **`*/10 * * * *`**. After the run,
+confirm the Cron remains present, review the applied migration, and check the
+console and health endpoint at the selected exposure. The Cron Trigger remains the
+only ECS mutation authority; the update path changes no control decision or ECS
+mutation semantics.
+
+### 3f. Manual equivalents
 
 For the preflight stage, so every step is visible:
 
@@ -428,11 +477,30 @@ npx wrangler d1 migrations apply TRAFFIC_DB --remote --config wrangler.deploy.js
 npx wrangler deploy --config wrangler.deploy.jsonc
 ```
 
+For an existing-Worker update, first confirm the production Cron is already live
+and choose the HTTP exposure that is already in use:
+
+```sh
+npm ci
+npm run validate
+export D1_DATABASE_ID=<the remote TRAFFIC_DB uuid>
+export REGION_ID=<the ECS region>                  # required at runtime
+export ECS_INSTANCE_ID=<the single instance>       # required at runtime
+export HTTP_EXPOSURE_MODE=workers_dev              # or: custom_domain
+export WORKER_CUSTOM_DOMAIN=<hostname>             # required only for custom_domain
+node scripts/resolve-deploy-config.mjs --mode update
+npx wrangler d1 migrations apply TRAFFIC_DB --remote --config wrangler.update.jsonc
+npx wrangler deploy --config wrangler.update.jsonc
+```
+
+Then confirm Cron remains `*/10 * * * *`, the pending D1 migration is applied, the
+required Worker Secret names remain present, and console/health checks pass.
+
 `npm run validate` runs the same checks as CI, in the same order, in one
 invocation — so it cannot be left half-run. The migration step is ordered before
 the deploy so the schema exists before a Worker version that writes to it is live.
 
-### 3f. Version URL lifecycle
+### 3g. Version URL lifecycle
 
 - **PRE-FLIGHT:** `preview_urls = true`, so a Version URL exists for verification.
   Its config also declares `secrets: { required: [] }`, because Wrangler refuses to
@@ -442,8 +510,8 @@ the deploy so the schema exists before a Worker version that writes to it is liv
   uploaded version against **production** resources, so it is a verification window,
   not a staging environment.
 
-The stable endpoint after release is the one the owner chose in §3c, and it is
-explicit in the generated config rather than implicit in the absence of one.
+The stable endpoint after RELEASE is the one the owner chose in §3c. UPDATE keeps
+that same selected exposure explicit in its generated config.
 
 ## 4. `StopCharging` implications — read before changing `STOPPED_MODE`
 
@@ -607,15 +675,16 @@ nothing, which is why the figure is recorded rather than assumed.
   been applied; a storage failure degrades the record only, and is surfaced in the
   webhook payload.
 - **Changing the cadence** is a one-line edit to `PRODUCTION_CRONS` in
-  `scripts/resolve-deploy-config.mjs`, followed by a RELEASE. The committed
+  `scripts/resolve-deploy-config.mjs`, followed by an UPDATE for an existing
+  Worker. RELEASE uses the same value for the first Cron enable. The committed
   `wrangler.jsonc` still declares `*/10 * * * *` as the documented intent.
 - **The Cron Trigger is the only ECS mutation authority.** No HTTP route can start,
   stop, or reboot an instance. `POST /api/query` is read-only by construction: its
   dependencies expose no mutation seam.
-- **A re-deployment of an existing Worker** uses RELEASE. `wrangler versions upload`
-  is the natural starting point for a future safer update workflow, because the
-  Worker now exists; **no such workflow is implemented yet**, and this document does
-  not claim one exists.
+- **A re-deployment of an existing Worker** uses the owner-gated UPDATE workflow
+  (`.github/workflows/update.yml`) and `wrangler.update.jsonc`. The config retains
+  Cron at `*/10 * * * *`, preserves the selected HTTP exposure and required Worker
+  Secret declaration, and applies pending D1 migrations before deploying code.
 
 ## 9. References
 

@@ -1,7 +1,9 @@
 name: Release deploy (Cron authority)
 
-# SECOND STAGE of the two-stage first deployment (PLAN §14, R10), and the only
-# path that enables scheduled ECS mutation authority.
+# SECOND STAGE of the two-stage first deployment (PLAN §14, R10), and the path
+# that first enables scheduled ECS mutation authority after live verification.
+# Existing-Worker UPDATE carries the same Cron expression only to preserve its
+# already-live schedule.
 #
 # WHY THIS IS SEPARATE FROM PRE-FLIGHT
 #
@@ -31,13 +33,13 @@ name: Release deploy (Cron authority)
 # because workflow code comes from the selected ref.
 #
 # RELEASE also restores `secrets.required`, which PRE-FLIGHT had to clear because a
-# Worker that does not exist yet cannot hold secrets. PRE-FLIGHT and RELEASE both
-# check the required names after deployment; a missing secret also fails RELEASE.
+# Worker that does not exist yet cannot hold secrets. PRE-FLIGHT, RELEASE, and
+# UPDATE check the required names after deployment; a missing secret also fails.
 #
 # Every confirmation is `required` and has no default value, because a boolean with
 # a default is a gate that passes when nobody looks at it.
 #
-# Cron enabled by this workflow: */10 * * * *  (every 10 minutes, UTC)
+# Cron first enabled by this workflow: */10 * * * *  (every 10 minutes, UTC)
 #
 # No secret value is echoed. Commands reference bindings by name; the resolved D1
 # identifier is not printed either.
