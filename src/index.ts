@@ -25,6 +25,7 @@ import type { Config } from "./config";
 import {
   listCdtInternetTraffic,
   describeInstance,
+  queryBssBilling,
   startInstance,
   stopInstance,
 } from "./aliyun/api";
@@ -56,6 +57,7 @@ export interface Env {
   readonly STOPPED_MODE?: string;
   readonly ADMIN_USER?: string;
   readonly ADMIN_TOKEN?: string;
+  readonly ENABLE_BILLING?: string;
   readonly TRAFFIC_DB?: D1Database;
   readonly ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -286,6 +288,19 @@ export default {
       },
       history: async (limit) => readHistoryFor(env, request, limit),
       query: async () => readOnlyQuery(env),
+      billing: async () => {
+        const parsed = loadConfig(env);
+        if (!parsed.ok) {
+          return { enabled: false, monthly_cost: null, balance: null, currency: null, error: null };
+        }
+        const config = parsed.config;
+        return queryBssBilling({
+          enabled: config.enableBilling,
+          accessKeyId: config.accessKeyId,
+          accessKeySecret: config.accessKeySecret,
+          signatureVersion: config.signatureVersion,
+        });
+      },
     });
 
     // Workers Static Assets is configured for SPA fallback, but Worker-first
@@ -342,7 +357,7 @@ async function readOnlyQuery(env: Env): Promise<unknown> {
     return { status: "error", stage: "config", error: parsed.error.message };
   }
   const config = parsed.config;
-  return runReadOnlyQuery(
+  const query = await runReadOnlyQuery(
     {
       getTraffic: () =>
         listCdtInternetTraffic({
@@ -363,6 +378,13 @@ async function readOnlyQuery(env: Env): Promise<unknown> {
     },
     { trafficThresholdGB: config.trafficThresholdGB },
   );
+  const billing = await queryBssBilling({
+    enabled: config.enableBilling,
+    accessKeyId: config.accessKeyId,
+    accessKeySecret: config.accessKeySecret,
+    signatureVersion: config.signatureVersion,
+  });
+  return { ...query, billing };
 }
 
 /** Re-exported so `RunReport` consumers do not reach into the monitor module. */

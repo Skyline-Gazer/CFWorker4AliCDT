@@ -309,6 +309,80 @@ export interface ListTrafficOptions extends ApiContext {
   readonly businessRegionId?: string | undefined;
 }
 
+export const BSS_API_VERSION = "2017-12-14";
+export const BSS_ENDPOINT = "bssopenapi.aliyuncs.com";
+
+export interface DonorCostInfo {
+  readonly enabled: boolean;
+  readonly monthly_cost: number | null;
+  readonly balance: number | null;
+  readonly currency: string | null;
+  readonly error: string | null;
+}
+
+export interface QueryBssBillingOptions extends ApiContext {
+  readonly enabled: boolean;
+}
+
+const BssBalanceResponse = z
+  .object({
+    Success: z.boolean().optional(),
+    Data: z
+      .object({
+        AvailableCashAmount: z.unknown().optional(),
+        Currency: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+function finiteAmount(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** Read BSS account cash balance through the shared signed RPC boundary. */
+export async function queryBssBilling(options: QueryBssBillingOptions): Promise<DonorCostInfo> {
+  if (!options.enabled) {
+    return { enabled: false, monthly_cost: null, balance: null, currency: null, error: null };
+  }
+
+  const unavailable = (error: string): DonorCostInfo => ({
+    enabled: true,
+    monthly_cost: null,
+    balance: null,
+    currency: null,
+    error,
+  });
+
+  let result: Awaited<ReturnType<typeof callRpc>>;
+  try {
+    result = await callRpc(
+      rpcOptions(options, BSS_ENDPOINT, "QueryAccountBalance", BSS_API_VERSION, {}),
+    );
+  } catch {
+    return unavailable("BSS billing request failed.");
+  }
+  if (!result.ok) return unavailable("BSS billing request failed.");
+
+  const parsed = BssBalanceResponse.safeParse(result.data);
+  if (!parsed.success || parsed.data.Success !== true) {
+    return unavailable("BSS billing response was unavailable.");
+  }
+  const balance = finiteAmount(parsed.data.Data?.AvailableCashAmount);
+  const currency = parsed.data.Data?.Currency;
+  if (balance === undefined || typeof currency !== "string" || currency.trim() === "") {
+    return unavailable("BSS billing response was incomplete.");
+  }
+
+  // Monthly spend stays null: the balance API reports a point-in-time cash
+  // balance, not a monthly bill. Never present it as spend or a zero bill.
+  return { enabled: true, monthly_cost: null, balance, currency, error: null };
+}
+
 /**
  * Query CDT internet traffic for the account.
  *

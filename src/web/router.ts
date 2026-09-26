@@ -23,6 +23,7 @@ import { authenticate, basicChallenge } from "./auth";
 import type { AuthConfig } from "./auth";
 import {
   adaptDonorConfig,
+  adaptDonorBilling,
   adaptDonorHistory,
   adaptDonorLogs,
   adaptDonorStatus,
@@ -31,6 +32,7 @@ import {
 import { redact } from "../redact";
 import type { HistoryRow } from "../storage/read";
 import type { ConfigResult } from "../config";
+import type { DonorCostInfo } from "../aliyun/api";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -48,6 +50,8 @@ export interface RouteDeps {
   readonly history: (limit?: number) => Promise<readonly HistoryRow[]>;
   /** `POST /api/query` — strictly read-only live query (SPEC §8.5). Serialised as-is. */
   readonly query: () => Promise<unknown>;
+  /** Optional BSS balance read for authenticated donor billing actions. */
+  readonly billing?: () => Promise<DonorCostInfo>;
 }
 
 export interface RouteResult {
@@ -82,6 +86,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_history", "GET"],
   ["get_logs", "GET"],
   ["get_config", "GET"],
+  ["get_billing", "GET"],
 ]);
 
 function isKnownPath(path: string): boolean {
@@ -199,6 +204,14 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     const parsed = deps.config();
     if (!parsed.ok) return result(500, "Internal Server Error");
     return jsonResult(200, adaptDonorConfig(parsed.config));
+  }
+
+  if (action === "get_billing") {
+    const cost =
+      deps.billing === undefined
+        ? { enabled: false, monthly_cost: null, balance: null, currency: null, error: null }
+        : await deps.billing();
+    return jsonResult(200, adaptDonorBilling(cost));
   }
 
   const unsupported = unsupportedDonorAction(action);

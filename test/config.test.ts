@@ -35,6 +35,7 @@ describe("loadConfig — defaults (SPEC §2.2)", () => {
     expect(result.config.stoppedMode).toBe("KeepCharging");
     expect(result.config.businessRegionId).toBeUndefined();
     expect(result.config.adminUser).toBe("admin");
+    expect(result.config.enableBilling).toBe(false);
   });
 
   it("populates required fields from the environment", () => {
@@ -66,6 +67,21 @@ describe("loadConfig — defaults (SPEC §2.2)", () => {
     expect(result.config.businessRegionId).toBe("cn-hongkong");
     expect(result.config.adminUser).toBe("operator");
   });
+});
+
+describe("loadConfig — ENABLE_BILLING", () => {
+  it.each(["1", "true", "TRUE", "yes", " YeS "])("enables billing for %o", (value) => {
+    const result = loadConfig({ ...VALID, ENABLE_BILLING: value });
+    expect(result.ok && result.config.enableBilling).toBe(true);
+  });
+
+  it.each([undefined, "", "0", "false", "on", "no", " true-ish "])(
+    "defaults billing off for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_BILLING: value });
+      expect(result.ok && result.config.enableBilling).toBe(false);
+    },
+  );
 });
 
 describe("loadConfig — required bindings (SPEC §2.4)", () => {

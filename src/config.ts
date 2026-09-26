@@ -43,6 +43,7 @@ export interface RawEnv {
   readonly STOPPED_MODE?: string | undefined;
   readonly ADMIN_USER?: string | undefined;
   readonly ADMIN_TOKEN?: string | undefined;
+  readonly ENABLE_BILLING?: string | undefined;
 }
 
 /** Validated, typed configuration. Absent optional values are `undefined`. */
@@ -60,6 +61,7 @@ export interface Config {
   readonly stoppedMode: StoppedMode;
   readonly adminUser: string;
   readonly adminToken: string | undefined;
+  readonly enableBilling: boolean;
 }
 
 /**
@@ -216,6 +218,9 @@ export function loadConfig(env: RawEnv): ConfigResult {
       stoppedMode,
       adminUser: present(env.ADMIN_USER) ? env.ADMIN_USER : DEFAULT_ADMIN_USER,
       adminToken: present(env.ADMIN_TOKEN) ? env.ADMIN_TOKEN : undefined,
+      enableBilling:
+        typeof env.ENABLE_BILLING === "string" &&
+        ["1", "true", "yes"].includes(env.ENABLE_BILLING.trim().toLowerCase()),
     },
   };
 }
