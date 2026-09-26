@@ -25,6 +25,14 @@
 > Paid is not required solely by that single-run observation. See
 > `docs/operations/deployment.md` §7.
 
+> Owner amendment (2026-09-26): corrective donor UI integration is tracked under
+> Epic #77. The historical server-rendered P7 acceptance remains in place: Issue
+> #39 remains CLOSED and Issue #47 remains Done. Donor provenance and action
+> compatibility are recorded in [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)
+> and [`p7-donor-api-compatibility.md`](./p7-donor-api-compatibility.md); this
+> follow-up does not recast that acceptance as a failure. Refs #78 #80 are
+> documentation scope only and do not authorize production PRE-FLIGHT/RELEASE.
+
 ## 1. Document control
 
 | Field | Value |

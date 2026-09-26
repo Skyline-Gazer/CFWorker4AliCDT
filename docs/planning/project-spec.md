@@ -15,6 +15,15 @@
 > Paid is not required solely by that single-run observation. See
 > `docs/operations/deployment.md` §7.
 
+> Amendment (2026-09-26): corrective donor UI integration is tracked under
+> Epic #77 as a follow-up to the historical server-rendered P7 acceptance. Issue
+> #39 remains CLOSED and Issue #47 remains Done; this amendment does not change
+> the runtime contract in this SPEC or recast that acceptance as a failure. Donor
+> actions and their compatibility boundaries are documented in
+> [`p7-donor-api-compatibility.md`](./p7-donor-api-compatibility.md). Refs #78 #80
+> are documentation scope only; no production PRE-FLIGHT/RELEASE is authorized by
+> this work.
+
 ## 1. Scope
 
 This SPEC defines the observable behaviour of the Cloudflare Worker. It is the
