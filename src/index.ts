@@ -63,6 +63,9 @@ export interface Env {
   readonly SMTP_USER?: string;
   readonly SMTP_PASS?: string;
   readonly SMTP_FROM?: string;
+  readonly TELEGRAM_BOT_TOKEN?: string;
+  readonly TELEGRAM_CHAT_ID?: string;
+  readonly TELEGRAM_PROXY_URL?: string;
   readonly TRAFFIC_DB?: D1Database;
   readonly ASSETS?: { fetch(request: Request): Promise<Response> };
 }

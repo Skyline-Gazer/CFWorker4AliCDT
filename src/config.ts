@@ -49,6 +49,9 @@ export interface RawEnv {
   readonly SMTP_USER?: string | undefined;
   readonly SMTP_PASS?: string | undefined;
   readonly SMTP_FROM?: string | undefined;
+  readonly TELEGRAM_BOT_TOKEN?: string | undefined;
+  readonly TELEGRAM_CHAT_ID?: string | undefined;
+  readonly TELEGRAM_PROXY_URL?: string | undefined;
 }
 
 /** Validated, typed configuration. Absent optional values are `undefined`. */
@@ -73,6 +76,10 @@ export interface Config {
   readonly smtpUser: string | undefined;
   readonly smtpPass: string | undefined;
   readonly smtpFrom: string | undefined;
+  /** Present only when configured; values never returned to HTTP clients. */
+  readonly telegramBotToken: string | undefined;
+  readonly telegramChatId: string | undefined;
+  readonly telegramProxyUrl: string | undefined;
 }
 
 /**
@@ -121,6 +128,9 @@ const SECRET_BINDINGS = [
   "ADMIN_TOKEN",
   "SMTP_PASS",
   "SMTP_USER",
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
+  "TELEGRAM_PROXY_URL",
 ] as const;
 
 /** Exposed so tests can assert the redaction boundary covers every secret. */
@@ -239,6 +249,9 @@ export function loadConfig(env: RawEnv): ConfigResult {
       smtpUser: present(env.SMTP_USER) ? env.SMTP_USER : undefined,
       smtpPass: present(env.SMTP_PASS) ? env.SMTP_PASS : undefined,
       smtpFrom: present(env.SMTP_FROM) ? env.SMTP_FROM.trim() : undefined,
+      telegramBotToken: present(env.TELEGRAM_BOT_TOKEN) ? env.TELEGRAM_BOT_TOKEN : undefined,
+      telegramChatId: present(env.TELEGRAM_CHAT_ID) ? env.TELEGRAM_CHAT_ID.trim() : undefined,
+      telegramProxyUrl: present(env.TELEGRAM_PROXY_URL) ? env.TELEGRAM_PROXY_URL.trim() : undefined,
     },
   };
 }

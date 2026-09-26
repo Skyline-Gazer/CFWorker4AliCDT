@@ -123,6 +123,7 @@ describe("route — protected routes require authentication", () => {
     ["GET", "/?action=get_billing"],
     ["POST", "/?action=send_test_webhook"],
     ["POST", "/?action=send_test_email"],
+    ["POST", "/?action=send_test_telegram"],
     ["GET", "/?action=get_logs"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
@@ -383,7 +384,6 @@ describe("route — dispatch with valid credentials", () => {
       "setup",
       "control_instance",
       "save_config",
-      "send_test_telegram",
       "clear_logs",
       "logout",
     ];
@@ -453,6 +453,7 @@ describe("route — dispatch with valid credentials", () => {
         webhook_method: "POST",
         webhook_content_type: "application/json",
         smtp_configured: false,
+        telegram_configured: false,
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -474,6 +475,7 @@ describe("route — dispatch with valid credentials", () => {
         "webhook_method",
         "webhook_content_type",
         "smtp_configured",
+        "telegram_configured",
       ].sort(),
     );
     for (const secret of [
@@ -627,6 +629,56 @@ describe("route — dispatch with valid credentials", () => {
     });
     expect(result.body).not.toContain("private-smtp-pass");
     expect(result.body).not.toContain("body-smtp-pass");
+  });
+
+  it("fails closed for send_test_telegram when Telegram is not configured", async () => {
+    const { deps } = harness();
+    const result = await route(
+      request("POST", "/?action=send_test_telegram", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "TELEGRAM_NOT_CONFIGURED",
+      action: "send_test_telegram",
+    });
+  });
+
+  it("fails closed for send_test_telegram when Telegram is configured but transport is inactive", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "secret-access-id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret-access-key",
+          ADMIN_TOKEN: "tok123",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          TELEGRAM_BOT_TOKEN: "private-bot-token",
+          TELEGRAM_CHAT_ID: "-1009988776655",
+        }),
+    });
+    const req = new Request("https://worker.test/?action=send_test_telegram", {
+      method: "POST",
+      headers: {
+        authorization: basic("admin", "tok123"),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ telegram: { bot_token: "body-bot-token", chat_id: "999" } }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "BACKEND_NOT_AVAILABLE",
+      action: "send_test_telegram",
+    });
+    expect(result.body).not.toContain("private-bot-token");
+    expect(result.body).not.toContain("body-bot-token");
   });
 
   it("keeps authentication as the gate for donor login and never echoes credentials", async () => {
