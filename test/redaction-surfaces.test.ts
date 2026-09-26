@@ -87,6 +87,7 @@ const ROW: HistoryRow = {
   webhook_ok: 1,
   error_stage: "cdt-query",
   error_message: null,
+  decision_reason: null,
   duration_ms: 1,
 };
 

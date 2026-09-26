@@ -95,8 +95,18 @@ describe("runPipeline — no-op runs", () => {
     const report = await runPipeline(h.deps, CONFIG);
     expect(report.status).toBe("success");
     expect(report.action).toBe("none-running");
+    expect(report.decisionReason).toContain("traffic 1 GB is below threshold 180 GB");
     expect(h.starts).toBe(0);
     expect(h.stops).toBe(0);
+  });
+
+  it("leaves the decision reason unknown when CDT fails before a decision", async () => {
+    const h = harness({
+      getTraffic: () => Promise.resolve(new TrafficUnavailableError("no TrafficDetails")),
+    });
+    const report = await runPipeline(h.deps, CONFIG);
+    expect(report.decisionReason).toBeUndefined();
+    expect(report.trafficAggregation).toBeUndefined();
   });
 
   it("still reports on a no-op run when a notifier is configured", async () => {

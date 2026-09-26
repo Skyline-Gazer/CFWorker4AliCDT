@@ -36,6 +36,7 @@ export interface HistoryRow {
   readonly ecs_status_before: string | null;
   readonly desired_ecs_state: string | null;
   readonly action: string | null;
+  readonly decision_reason: string | null;
   readonly ecs_status_after: string | null;
   readonly control_ok: number | null;
   readonly webhook_attempted: number | null;
@@ -109,7 +110,7 @@ export function clampLimit(raw: string | null | undefined): number {
 export function historyQuery(): string {
   return `SELECT id, checked_at, trigger, status, traffic_gb, threshold_gb,
                  usage_percent, remaining_gb, ecs_status_before, desired_ecs_state,
-                 action, ecs_status_after, control_ok, webhook_attempted, webhook_ok,
+                 action, ecs_status_after, decision_reason, control_ok, webhook_attempted, webhook_ok,
                  error_stage, error_message, duration_ms
           FROM traffic_checks
           ORDER BY checked_at DESC, id DESC

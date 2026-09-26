@@ -18,8 +18,13 @@
  */
 
 import type { Config } from "../config";
-import type { EcsStatus, InstanceObservation, TrafficReading } from "../aliyun/api";
-import { TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
+import type {
+  EcsStatus,
+  InstanceObservation,
+  TrafficAggregationAudit,
+  TrafficReading,
+} from "../aliyun/api";
+import { auditTrafficAggregation, TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
 import { decide } from "./decision";
 import type { Decision, DecisionAction } from "./decision";
@@ -85,6 +90,8 @@ interface ReportOutcome {
   readonly desired?: "running" | "stopped" | undefined;
   readonly action?: DecisionAction | undefined;
   readonly stoppedModeRequested?: "StopCharging" | "KeepCharging" | undefined;
+  readonly decisionReason?: string | undefined;
+  readonly trafficAggregation?: TrafficAggregationAudit | undefined;
 }
 export interface RunReport {
   readonly status: "success" | "error";
@@ -94,6 +101,10 @@ export interface RunReport {
   readonly ecsStatusAfter: EcsStatus | undefined;
   readonly desired: "running" | "stopped" | undefined;
   readonly action: DecisionAction | undefined;
+  /** Missing before a decision is made; it is never reconstructed from fields. */
+  readonly decisionReason?: string | undefined;
+  /** Actual CDT TrafficDetails aggregation, when the reading was established. */
+  readonly trafficAggregation?: TrafficAggregationAudit | undefined;
   readonly stoppedModeRequested: "StopCharging" | "KeepCharging" | undefined;
   readonly instanceId: string;
   readonly region: string;
@@ -185,6 +196,8 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
     });
   }
 
+  const trafficAggregation = auditTrafficAggregation(traffic);
+
   // 3. Describe the instance. A failure, or an instance absent from the
   //    response, aborts: absence is not evidence of state.
   const observation = await deps.describeInstance();
@@ -194,6 +207,7 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
       stage: "ecs-describe",
       error: describeError(observation),
       trafficGB,
+      trafficAggregation,
     });
   }
 
@@ -215,6 +229,8 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
       ecsStatusBefore: observation.status,
       desired: decision.desired,
       action: decision.action,
+      decisionReason: decision.reason,
+      trafficAggregation,
     });
   }
 
@@ -230,6 +246,8 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
         ecsStatusBefore: observation.status,
         desired: decision.desired,
         action: decision.action,
+        decisionReason: decision.reason,
+        trafficAggregation,
         stoppedModeRequested: decision.action === "stop" ? config.stoppedMode : undefined,
       });
     }
@@ -246,6 +264,8 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
       ecsStatusAfter,
       desired: decision.desired,
       action: decision.action,
+      decisionReason: decision.reason,
+      trafficAggregation,
       stoppedModeRequested: decision.action === "stop" ? config.stoppedMode : undefined,
     });
   }
@@ -259,6 +279,8 @@ export async function runPipeline(deps: PipelineDeps, config: PipelineConfig): P
     ecsStatusAfter: observation.status,
     desired: decision.desired,
     action: decision.action,
+    decisionReason: decision.reason,
+    trafficAggregation,
   });
 }
 

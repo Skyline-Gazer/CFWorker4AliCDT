@@ -17,8 +17,13 @@
  * screen used to make decisions.
  */
 
-import type { EcsStatus, InstanceObservation, TrafficReading } from "../aliyun/api";
-import { TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
+import type {
+  EcsStatus,
+  InstanceObservation,
+  TrafficAggregationAudit,
+  TrafficReading,
+} from "../aliyun/api";
+import { auditTrafficAggregation, TrafficUnavailableError, trafficBytesToGb } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
 import { redact } from "../redact";
 import { decide } from "../monitor/decision";
@@ -52,6 +57,7 @@ export interface QueryResult {
   readonly desired: "running" | "stopped" | undefined;
   readonly action: DecisionAction | undefined;
   readonly reason: string | undefined;
+  readonly trafficAggregation: TrafficAggregationAudit | undefined;
   /** Always `false`. Present so a client can assert it rather than infer it. */
   readonly mutation: false;
   readonly stage: ErrorStage | undefined;
@@ -75,6 +81,7 @@ function errorOf(
     desired: undefined,
     action: undefined,
     reason: undefined,
+    trafficAggregation: undefined,
     mutation: false,
     stage,
     // Redacted: a remote validation error can echo a request header, and this
@@ -111,6 +118,8 @@ export async function runReadOnlyQuery(deps: QueryDeps, config: QueryConfig): Pr
       };
     }
 
+    const trafficAggregation = auditTrafficAggregation(traffic);
+
     // 2. Describe. A missing instance or a failed call aborts: absence is not
     //    evidence of state, exactly as on the scheduled path.
     const observation = await deps.describeInstance();
@@ -119,6 +128,7 @@ export async function runReadOnlyQuery(deps: QueryDeps, config: QueryConfig): Pr
         ...errorOf("ecs-describe", observation),
         trafficGB,
         thresholdGB: config.trafficThresholdGB,
+        trafficAggregation,
       };
     }
 
@@ -140,6 +150,7 @@ export async function runReadOnlyQuery(deps: QueryDeps, config: QueryConfig): Pr
       desired: decision.desired,
       action: decision.action,
       reason: decision.reason,
+      trafficAggregation,
       // Stated rather than omitted: the client can assert it, and a future change
       // that tried to set it true would have to change this type.
       mutation: false,

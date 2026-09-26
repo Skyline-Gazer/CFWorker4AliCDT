@@ -33,6 +33,8 @@ const SUCCESS: HistoryReport = {
   ecsStatusAfter: "stopped",
   desired: "stopped",
   action: "stop",
+  decisionReason:
+    'traffic 123.45 GB has reached threshold 180 GB; instance is "running", so a stop is required',
   stoppedModeRequested: "KeepCharging",
   instanceId: "i-abc123",
   region: "cn-hongkong",
@@ -50,6 +52,7 @@ const FAILED: HistoryReport = {
   stage: "cdt-query",
   error: "CDT response had no TrafficDetails",
   trafficGB: undefined,
+  decisionReason: undefined,
   ecsStatusBefore: undefined,
   ecsStatusAfter: undefined,
   desired: undefined,
@@ -86,6 +89,7 @@ describe("buildRow — maps the report onto SPEC §9.3", () => {
       ecs_status_before: "running",
       desired_ecs_state: "stopped",
       action: "stop",
+      decision_reason: SUCCESS.decisionReason,
       ecs_status_after: "stopped",
       webhook_attempted: 1,
       webhook_ok: 1,
@@ -107,6 +111,15 @@ describe("buildRow — maps the report onto SPEC §9.3", () => {
     // fabricated zero would read as a full allowance.
     expect(row.usage_percent).toBeNull();
     expect(row.remaining_gb).toBeNull();
+  });
+
+  it("stores a decision reason only when the report actually has one", () => {
+    expect(buildRow(SUCCESS).decision_reason).toBe(SUCCESS.decisionReason);
+    expect(buildRow(FAILED).decision_reason).toBeNull();
+    expect(
+      buildRow({ ...FAILED, decisionReason: undefined, error: "Threshold unavailable" })
+        .decision_reason,
+    ).toBeNull();
   });
 
   it("stores a genuine zero reading as 0, distinguishably from NULL", () => {

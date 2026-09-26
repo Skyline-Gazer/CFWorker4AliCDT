@@ -8,6 +8,12 @@
 
 import type { HistoryRow } from "../storage/read";
 
+export interface DonorRegionTraffic {
+  readonly businessRegionId: string | null;
+  readonly trafficBytes: number;
+  readonly entryCount: number;
+}
+
 export interface DonorStatusEntry {
   /** Local singleton key for UI actions; it is not an ECS or account identifier. */
   readonly id: "configured-instance";
@@ -18,6 +24,10 @@ export interface DonorStatusEntry {
   readonly percentageOfUse: number | null;
   readonly thresholdReached: boolean | null;
   readonly instanceStatus: string;
+  readonly decision_desired: "running" | "stopped" | null;
+  readonly decision_reason: string | null;
+  readonly traffic_summation_scope: string | null;
+  readonly traffic_by_business_region: readonly DonorRegionTraffic[];
 }
 
 export interface DonorStatusResponse {
@@ -43,6 +53,11 @@ export interface DonorHistoryResponse {
   readonly data: {
     readonly history_24h: readonly DonorHistoryPoint[];
     readonly history_30d: readonly DonorDailyHistoryPoint[];
+    readonly decision_history: readonly {
+      readonly time: string;
+      readonly action: string | null;
+      readonly reason: string | null;
+    }[];
   };
 }
 
@@ -93,6 +108,18 @@ export function adaptDonorStatus(value: unknown): DonorStatusResponse {
     trafficGB !== null && usableThreshold ? (trafficGB / thresholdGB) * 100 : null;
   const thresholdReached = trafficGB !== null && usableThreshold ? trafficGB >= thresholdGB : null;
   const ecsStatus = donorEcsStatus(query.ecsStatus);
+  const trafficAggregation = recordOf(query.trafficAggregation);
+  const regionRows = Array.isArray(trafficAggregation?.byBusinessRegion)
+    ? trafficAggregation.byBusinessRegion.flatMap((value) => {
+        const row = recordOf(value);
+        const trafficBytes = finiteNonNegative(row?.trafficBytes);
+        const entryCount = finiteNonNegative(row?.entryCount);
+        const businessRegionId =
+          typeof row?.businessRegionId === "string" ? row.businessRegionId : null;
+        if (trafficBytes === undefined || entryCount === undefined) return [];
+        return [{ businessRegionId, trafficBytes, entryCount }];
+      })
+    : [];
 
   return {
     success: true,
@@ -110,6 +137,14 @@ export function adaptDonorStatus(value: unknown): DonorStatusResponse {
           percentageOfUse !== null && Number.isFinite(percentageOfUse) ? percentageOfUse : null,
         thresholdReached,
         instanceStatus: ecsStatus,
+        decision_desired:
+          query.desired === "running" || query.desired === "stopped" ? query.desired : null,
+        decision_reason: typeof query.reason === "string" ? query.reason : null,
+        traffic_summation_scope:
+          trafficAggregation?.summationScope === "all TrafficDetails entries"
+            ? trafficAggregation.summationScope
+            : null,
+        traffic_by_business_region: regionRows,
       },
     ],
   };
@@ -151,12 +186,25 @@ export function adaptDonorHistory(
     if (!daily.has(date)) daily.set(date, { date, value: point.value });
   }
 
+  const decisionHistory = [...rows]
+    .sort((left, right) => {
+      const byTime = Date.parse(right.checked_at) - Date.parse(left.checked_at);
+      return Number.isNaN(byTime) || byTime === 0 ? right.id - left.id : byTime;
+    })
+    .slice(0, 5)
+    .map((row) => ({
+      time: row.checked_at,
+      action: row.action,
+      reason: row.decision_reason,
+    }));
+
   return {
     success: true,
     mutation: false,
     data: {
       history_24h: last24h,
       history_30d: [...daily.values()].sort((left, right) => left.date.localeCompare(right.date)),
+      decision_history: decisionHistory,
     },
   };
 }

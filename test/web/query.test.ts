@@ -116,6 +116,48 @@ describe("runReadOnlyQuery — observation and decision (SPEC §8.5)", () => {
     expect(result.reason?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it("returns explicit all-entry and per-business-region traffic audit fields", async () => {
+    const result = await runReadOnlyQuery(
+      deps({
+        getTraffic: () =>
+          Promise.resolve({
+            totalBytes: 12,
+            entries: [
+              { businessRegionId: "cn-hongkong", ispType: "CMI", bytes: 5 },
+              { businessRegionId: "cn-hongkong", ispType: "CU", bytes: 4 },
+              { businessRegionId: undefined, ispType: undefined, bytes: 3 },
+            ],
+          }),
+      }),
+      CONFIG,
+    );
+
+    expect(result.trafficAggregation).toEqual({
+      unit: "bytes",
+      summationScope: "all TrafficDetails entries",
+      totalBytes: 12,
+      entries: [
+        { businessRegionId: "cn-hongkong", ispType: "CMI", trafficBytes: 5 },
+        { businessRegionId: "cn-hongkong", ispType: "CU", trafficBytes: 4 },
+        { businessRegionId: null, ispType: null, trafficBytes: 3 },
+      ],
+      byBusinessRegion: [
+        { businessRegionId: "cn-hongkong", trafficBytes: 9, entryCount: 2 },
+        { businessRegionId: null, trafficBytes: 3, entryCount: 1 },
+      ],
+    });
+    expect(JSON.stringify(result.trafficAggregation)).not.toContain("accountId");
+  });
+
+  it("does not invent a decision reason before a decision can be made", async () => {
+    const result = await runReadOnlyQuery(
+      deps({ getTraffic: () => Promise.resolve(new TrafficUnavailableError("no TrafficDetails")) }),
+      CONFIG,
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.trafficAggregation).toBeUndefined();
+  });
+
   it("evaluates the threshold boundary exactly as the scheduled path does", async () => {
     const above = await runReadOnlyQuery(
       deps({ getTraffic: () => Promise.resolve({ totalBytes: 180 * 1024 ** 3, entries: [] }) }),

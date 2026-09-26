@@ -36,6 +36,8 @@ const ROW: HistoryRow = {
   webhook_ok: 1,
   error_stage: null,
   error_message: null,
+  decision_reason:
+    "traffic 123.45 GB has reached threshold 180 GB; instance is running, so a stop is required",
   duration_ms: 812,
 };
 
@@ -79,6 +81,17 @@ describe("renderDashboard — required fields (SPEC §8.4)", () => {
   it("renders the last action and the decision reason", () => {
     const body = textOf(renderDashboard(input()));
     expect(body).toContain("stop");
+    expect(body).toContain("traffic 123.45 GB has reached threshold 180 GB");
+  });
+
+  it("escapes decision reasons and shows unknown for rows without one", () => {
+    const malicious = "<img src=x onerror=alert(1)>";
+    const html = renderDashboard(input({ latest: { ...ROW, decision_reason: malicious } }));
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain(malicious);
+
+    const unknown = textOf(renderDashboard(input({ latest: { ...ROW, decision_reason: null } })));
+    expect(unknown).toMatch(/unknown/i);
   });
 
   it("renders the last scheduled execution time", () => {
@@ -111,7 +124,13 @@ describe("renderDashboard — required fields (SPEC §8.4)", () => {
   it("states plainly when traffic is unknown rather than showing a number", () => {
     // A missing reading must never render as a figure an operator could read as
     // an actual measurement.
-    const unknown = { ...ROW, traffic_gb: null, usage_percent: null, remaining_gb: null };
+    const unknown = {
+      ...ROW,
+      traffic_gb: null,
+      usage_percent: null,
+      remaining_gb: null,
+      decision_reason: null,
+    };
     const body = textOf(renderDashboard(input({ latest: unknown, history: [unknown] })));
     expect(body).not.toContain("123.45");
     expect(body).toMatch(/unknown|unavailable|n\/a/i);
