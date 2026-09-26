@@ -69,6 +69,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         webhook_token_configured: true,
         webhook_method: "POST",
         webhook_content_type: "application/json",
+        smtp_configured: false,
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -99,6 +100,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         "webhook_url_configured",
         "webhook_method",
         "webhook_content_type",
+        "smtp_configured",
       ].sort(),
     );
   });
@@ -117,9 +119,28 @@ describe("adaptDonorConfig — safe allowlist", () => {
       webhook_token_configured: false,
       webhook_method: "POST",
       webhook_content_type: "application/json",
+      smtp_configured: false,
       admin_token_configured: false,
       aliyun_credentials_configured: true,
     });
+  });
+
+  it("reports smtp_configured only when host and from are present", () => {
+    const parsed = loadConfig({
+      ALIYUN_ACCESS_KEY_ID: "id",
+      ALIYUN_ACCESS_KEY_SECRET: "secret",
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-0123456789abcdef0",
+      SMTP_HOST: "smtp.example.com",
+      SMTP_FROM: "noreply@example.com",
+      SMTP_PASS: "private-smtp-pass",
+    });
+    if (!parsed.ok) throw new Error("fixture config should validate");
+    const data = adaptDonorConfig(parsed.config).data;
+    expect(data.smtp_configured).toBe(true);
+    expect(JSON.stringify(data)).not.toContain("private-smtp-pass");
+    expect(JSON.stringify(data)).not.toContain("smtp.example.com");
+    expect(JSON.stringify(data)).not.toContain("noreply@example.com");
   });
 });
 

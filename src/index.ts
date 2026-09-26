@@ -58,6 +58,11 @@ export interface Env {
   readonly ADMIN_USER?: string;
   readonly ADMIN_TOKEN?: string;
   readonly ENABLE_BILLING?: string;
+  readonly SMTP_HOST?: string;
+  readonly SMTP_PORT?: string;
+  readonly SMTP_USER?: string;
+  readonly SMTP_PASS?: string;
+  readonly SMTP_FROM?: string;
   readonly TRAFFIC_DB?: D1Database;
   readonly ASSETS?: { fetch(request: Request): Promise<Response> };
 }

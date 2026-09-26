@@ -44,6 +44,11 @@ export interface RawEnv {
   readonly ADMIN_USER?: string | undefined;
   readonly ADMIN_TOKEN?: string | undefined;
   readonly ENABLE_BILLING?: string | undefined;
+  readonly SMTP_HOST?: string | undefined;
+  readonly SMTP_PORT?: string | undefined;
+  readonly SMTP_USER?: string | undefined;
+  readonly SMTP_PASS?: string | undefined;
+  readonly SMTP_FROM?: string | undefined;
 }
 
 /** Validated, typed configuration. Absent optional values are `undefined`. */
@@ -62,6 +67,12 @@ export interface Config {
   readonly adminUser: string;
   readonly adminToken: string | undefined;
   readonly enableBilling: boolean;
+  /** Present only when configured; values never returned to HTTP clients. */
+  readonly smtpHost: string | undefined;
+  readonly smtpPort: string | undefined;
+  readonly smtpUser: string | undefined;
+  readonly smtpPass: string | undefined;
+  readonly smtpFrom: string | undefined;
 }
 
 /**
@@ -108,6 +119,8 @@ const SECRET_BINDINGS = [
   "WEBHOOK_URL",
   "WEBHOOK_TOKEN",
   "ADMIN_TOKEN",
+  "SMTP_PASS",
+  "SMTP_USER",
 ] as const;
 
 /** Exposed so tests can assert the redaction boundary covers every secret. */
@@ -221,6 +234,11 @@ export function loadConfig(env: RawEnv): ConfigResult {
       enableBilling:
         typeof env.ENABLE_BILLING === "string" &&
         ["1", "true", "yes"].includes(env.ENABLE_BILLING.trim().toLowerCase()),
+      smtpHost: present(env.SMTP_HOST) ? env.SMTP_HOST.trim() : undefined,
+      smtpPort: present(env.SMTP_PORT) ? env.SMTP_PORT.trim() : undefined,
+      smtpUser: present(env.SMTP_USER) ? env.SMTP_USER : undefined,
+      smtpPass: present(env.SMTP_PASS) ? env.SMTP_PASS : undefined,
+      smtpFrom: present(env.SMTP_FROM) ? env.SMTP_FROM.trim() : undefined,
     },
   };
 }
