@@ -301,14 +301,195 @@ describe("fetch — HTTP surface (SPEC §8.1)", () => {
     expect(response.status).toBe(404);
   });
 
+  it("serves donor CSS, Vue, ECharts, icon, and source assets from the binding", async () => {
+    const served: string[] = [];
+    const assets: NonNullable<Env["ASSETS"]> = {
+      fetch: (request) => {
+        const path = new URL(request.url).pathname;
+        served.push(path);
+        return Promise.resolve(new Response(`asset:${path}`));
+      },
+    };
+
+    for (const path of [
+      "/tailwind-compiled.css",
+      "/vue.global.prod.js",
+      "/echarts.min.js",
+      "/icon.png",
+      "/input.css",
+    ]) {
+      const response = await worker.fetch(
+        new Request(`https://w.test${path}`),
+        env({ ASSETS: assets }),
+        ctx(),
+      );
+      expect(response.status, path).toBe(200);
+      expect(await response.text(), path).toBe(`asset:${path}`);
+    }
+
+    expect(served).toEqual([
+      "/tailwind-compiled.css",
+      "/vue.global.prod.js",
+      "/echarts.min.js",
+      "/icon.png",
+      "/input.css",
+    ]);
+  });
+
+  it("serves the donor index at / only after existing auth succeeds", async () => {
+    let assetRequests = 0;
+    const assets: NonNullable<Env["ASSETS"]> = {
+      fetch: () => {
+        assetRequests += 1;
+        return Promise.resolve(
+          new Response("<html>donor console</html>", {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          }),
+        );
+      },
+    };
+
+    const denied = await worker.fetch(
+      new Request("https://w.test/"),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    expect(denied.status).toBe(401);
+    expect(assetRequests).toBe(0);
+
+    const allowed = await worker.fetch(
+      new Request("https://w.test/", {
+        headers: { authorization: `Bearer tok123` },
+      }),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get("content-type")).toContain("text/html");
+    expect(await allowed.text()).toContain("donor console");
+    expect(assetRequests).toBe(1);
+  });
+
+  it("does not let API or health paths fall through to SPA assets", async () => {
+    let assetRequests = 0;
+    const assets: NonNullable<Env["ASSETS"]> = {
+      fetch: () => {
+        assetRequests += 1;
+        return Promise.resolve(new Response("<html>fallback</html>"));
+      },
+    };
+
+    const apiDenied = await worker.fetch(
+      new Request("https://w.test/api/not-implemented"),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    const health = await worker.fetch(
+      new Request("https://w.test/health"),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    const nestedHealth = await worker.fetch(
+      new Request("https://w.test/health/extra"),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+
+    expect(apiDenied.status).toBe(401);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ status: "ok" });
+    expect(nestedHealth.status).toBe(404);
+    expect(assetRequests).toBe(0);
+  });
+
+  it("authenticates SPA fallbacks and allows the authenticated fallback", async () => {
+    const paths: string[] = [];
+    const assets: NonNullable<Env["ASSETS"]> = {
+      fetch: (request) => {
+        paths.push(new URL(request.url).pathname);
+        return Promise.resolve(new Response("<html>spa</html>"));
+      },
+    };
+
+    const denied = await worker.fetch(
+      new Request("https://w.test/settings"),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    expect(denied.status).toBe(401);
+    expect(paths).toEqual([]);
+
+    const allowed = await worker.fetch(
+      new Request("https://w.test/settings", {
+        headers: { authorization: `Basic ${btoa("admin:tok123")}` },
+      }),
+      env({ ASSETS: assets }),
+      ctx(),
+    );
+    expect(allowed.status).toBe(200);
+    expect(await allowed.text()).toContain("spa");
+    expect(paths).toEqual(["/settings"]);
+  });
+
   it("returns 405 for a known path with the wrong method", async () => {
     const response = await worker.fetch(
       new Request("https://w.test/api/query", { method: "GET" }),
       env(),
       ctx(),
     );
-    expect(response.status).toBe(405);
+    expect(response.status).toBe(401);
+
+    const authenticatedResponse = await worker.fetch(
+      new Request("https://w.test/api/query", {
+        method: "GET",
+        headers: { authorization: `Basic ${btoa("admin:tok123")}` },
+      }),
+      env(),
+      ctx(),
+    );
+    expect(authenticatedResponse.status).toBe(405);
   });
+
+  it.each(["Start", "Stop"])(
+    "rejects %s control without making any ECS or network call",
+    async (action) => {
+      let mutationCalls = 0;
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation((input: RequestInfo | URL) => {
+          const target =
+            typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          if (target.includes("StartInstance") || target.includes("StopInstance"))
+            mutationCalls += 1;
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        });
+
+      const response = await worker.fetch(
+        new Request("https://w.test/?action=control_instance", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer tok123`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ id: "i-test", action }),
+        }),
+        env(),
+        ctx(),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(501);
+      expect(body).toMatchObject({
+        action: "control_instance",
+        code: "FEATURE_NOT_IMPLEMENTED",
+        success: false,
+        mutation: false,
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mutationCalls).toBe(0);
+      fetchSpy.mockRestore();
+    },
+  );
 
   it("serves the dashboard with valid credentials", async () => {
     const response = await worker.fetch(

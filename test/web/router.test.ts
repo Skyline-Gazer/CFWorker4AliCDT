@@ -132,6 +132,26 @@ describe("route — protected routes require authentication", () => {
     }
     expect(counts.dashboard + counts.history + counts.query).toBe(0);
   });
+
+  it("protects every /api path before route and method checks", async () => {
+    const { deps } = harness();
+    for (const [method, path] of [
+      ["GET", "/api"],
+      ["GET", "/api/unknown"],
+      ["DELETE", "/api/query"],
+    ] as const) {
+      const result = await route(request(method, path), deps);
+      expect(result.status, `${method} ${path}`).toBe(401);
+    }
+  });
+
+  it("protects donor action requests before method and action dispatch", async () => {
+    const { deps } = harness();
+    for (const method of ["GET", "POST", "DELETE"]) {
+      const result = await route(request(method, "/?action=control_instance"), deps);
+      expect(result.status, method).toBe(401);
+    }
+  });
 });
 
 describe("route — dispatch with valid credentials", () => {
@@ -162,6 +182,102 @@ describe("route — dispatch with valid credentials", () => {
     const result = await route(request("GET", "/api/history", "Bearer tok123"), deps);
     expect(result.status).toBe(200);
     expect(counts.history).toBe(1);
+  });
+
+  it("returns an explicit unsupported response for control_instance", async () => {
+    const { deps, counts } = harness();
+    const result = await route(request("POST", "/?action=control_instance", "Bearer tok123"), deps);
+
+    expect(result.status).toBe(501);
+    expect(result.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(result.body)).toMatchObject({
+      action: "control_instance",
+      code: "FEATURE_NOT_IMPLEMENTED",
+      success: false,
+      mutation: false,
+    });
+    expect(counts.dashboard + counts.history + counts.query).toBe(0);
+  });
+
+  it("returns an explicit unsupported response for clear_logs without success", async () => {
+    const { deps } = harness();
+    const result = await route(
+      request("POST", "/?action=clear_logs", basic("admin", "tok123")),
+      deps,
+    );
+    const body = JSON.parse(result.body) as { success: boolean; code: string; mutation: boolean };
+
+    expect(result.status).toBe(501);
+    expect(body.success).toBe(false);
+    expect(body.code).toBe("FEATURE_NOT_IMPLEMENTED");
+    expect(body.mutation).toBe(false);
+  });
+
+  it("returns non-success placeholders for every inventoried donor action", async () => {
+    const { deps } = harness();
+    const actions = [
+      "check_init",
+      "setup",
+      "login",
+      "check_login",
+      "get_status",
+      "control_instance",
+      "get_config",
+      "save_config",
+      "send_test_email",
+      "send_test_telegram",
+      "send_test_webhook",
+      "refresh_account",
+      "get_logs",
+      "clear_logs",
+      "get_history",
+      "logout",
+    ];
+
+    for (const action of actions) {
+      const result = await route(
+        request("GET", `/?action=${action}`, basic("admin", "tok123")),
+        deps,
+      );
+      expect(result.status, action).toBe(501);
+      expect(JSON.parse(result.body), action).toMatchObject({
+        action,
+        success: false,
+        ok: false,
+        available: false,
+        mutation: false,
+      });
+    }
+  });
+
+  it("keeps unknown and prototype-like action names in the failure contract", async () => {
+    const { deps } = harness();
+    for (const action of ["unlisted_action", "toString", "__proto__"]) {
+      const result = await route(
+        request("GET", `/?action=${action}`, basic("admin", "tok123")),
+        deps,
+      );
+      expect(result.status).toBe(501);
+      expect(JSON.parse(result.body)).toMatchObject({
+        action: /^[a-z0-9_]{1,64}$/.test(action) ? action : "unknown",
+        code: "ACTION_NOT_AVAILABLE",
+        success: false,
+        mutation: false,
+      });
+    }
+  });
+
+  it("does not serve dashboard HTML for unsupported donor actions", async () => {
+    const { deps, counts } = harness();
+    const result = await route(
+      request("GET", "/?action=get_status", basic("admin", "tok123")),
+      deps,
+    );
+
+    expect(result.status).toBe(501);
+    expect(result.headers["content-type"]).toContain("application/json");
+    expect(result.body).not.toContain("<html>");
+    expect(counts.dashboard).toBe(0);
   });
 });
 
@@ -328,5 +444,15 @@ describe("route — result shape", () => {
       expect(typeof result.body).toBe("string");
       expect(result.headers).toBeTypeOf("object");
     }
+  });
+
+  it("does not send a donor action on a non-root API path to the asset surface", async () => {
+    const { deps } = harness();
+    const result = await route(
+      request("GET", "/api/status?action=get_status", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(404);
+    expect(result.headers["content-type"]).toBeUndefined();
   });
 });

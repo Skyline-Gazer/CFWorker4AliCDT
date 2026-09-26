@@ -6,8 +6,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-20",
 
-  // Scheduled-only Worker. No public control surface is exposed; the fetch
-  // handler serves GET /health and nothing else (SPEC §8).
+  // One Worker serves the donor's static console and the authenticated API.
+  // Worker-first routing keeps auth and health behavior ahead of SPA fallback.
+  "assets": {
+    "directory": "./static",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+
+  // Cron and the authenticated console share this Worker deployment.
   "workers_dev": false,
 
   // SPEC §11: every 10 minutes. 5-field Quartz-like expression.
