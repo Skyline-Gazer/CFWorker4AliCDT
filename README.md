@@ -1,13 +1,26 @@
 # CFWorker4AliCDT
 
-A single stateless Cloudflare Worker that enforces an Alibaba Cloud CDT traffic
-threshold by starting and stopping **one** ECS instance.
+A Cloudflare Worker that enforces an Alibaba Cloud CDT traffic threshold by
+starting and stopping **one** ECS instance. It is control-stateless: D1 stores
+monitoring history, but no control decision depends on that history.
 
 > **Status: pre-deployment.** No Worker has been deployed and no live Alibaba Cloud
 > call has been made. Several load-bearing facts cannot be verified without a
 > first deployment; they are recorded as assumptions in
 > [`docs/operations/assumptions-register.md`](docs/operations/assumptions-register.md)
 > rather than presented as documented behaviour.
+
+## P7 Web Console donor follow-up
+
+Corrective donor UI integration is tracked under Epic #77. The historical
+server-rendered P7 acceptance remains in place: Issue #39 remains CLOSED and
+Issue #47 remains Done. Refs #78 #80 cover donor provenance and the API
+compatibility inventory; they do not revise that acceptance as a failure. The
+compatibility matrix is in
+[`docs/planning/p7-donor-api-compatibility.md`](docs/planning/p7-donor-api-compatibility.md),
+and provenance is recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+This documentation work does not copy donor static assets, add adapters, or
+dispatch production PRE-FLIGHT/RELEASE.
 
 ## Why this exists
 
