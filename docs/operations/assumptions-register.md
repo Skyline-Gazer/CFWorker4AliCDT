@@ -92,8 +92,10 @@ If wrong: the effective threshold differs from the operator's intent. If the API
 returns more scope than expected, the instance stops early (safe); if less,
 enforcement trips late (not safe).
 In the meantime: `BUSINESS_REGION_ID` is applied as a **server-side request
-parameter**, so the sum always reflects what the API returned, and the per-region
-breakdown is retained in the payload so the scope is auditable (PLAN Q1).
+parameter**, so the sum always reflects what the API returned. The live query,
+donor status card, and webhook expose the all-entry scope and actual
+`BusinessRegionId` breakdown. History stores the total only; it does not imply
+that per-region historical samples exist (PLAN Q1).
 
 ### A6 — ECS `RegionId` and CDT `BusinessRegionId` are independent namespaces
 Evidence: **empirically unconfirmed.** No source establishes whether the two

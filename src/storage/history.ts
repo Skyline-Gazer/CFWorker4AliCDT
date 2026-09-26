@@ -34,6 +34,7 @@ export interface RowInsert {
   readonly ecs_status_before: string | null;
   readonly desired_ecs_state: string | null;
   readonly action: string | null;
+  readonly decision_reason: string | null;
   readonly ecs_status_after: string | null;
   readonly control_ok: number;
   readonly webhook_attempted: number;
@@ -58,6 +59,7 @@ export interface HistoryReport {
   readonly ecsStatusAfter: string | undefined;
   readonly desired: "running" | "stopped" | undefined;
   readonly action: DecisionAction | undefined;
+  readonly decisionReason?: string | undefined;
   readonly stoppedModeRequested: "StopCharging" | "KeepCharging" | undefined;
   readonly instanceId: string;
   readonly region: string;
@@ -157,6 +159,8 @@ export function buildRow(report: HistoryReport): RowInsert {
     ecs_status_before: nullish(report.ecsStatusBefore),
     desired_ecs_state: nullish(report.desired),
     action: nullish(report.action),
+    // Pre-migration rows and runs that never reached a decision remain unknown.
+    decision_reason: nullish(report.decisionReason),
     ecs_status_after: nullish(report.ecsStatusAfter),
     control_ok: bool(controlOk(report)),
     webhook_attempted: bool(report.webhookAttempted),

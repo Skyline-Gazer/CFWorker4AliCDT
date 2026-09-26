@@ -24,6 +24,11 @@
 > are documentation scope only; no production PRE-FLIGHT/RELEASE is authorized by
 > this work.
 
+> Amendment (2026-09-26): Refs #87 #88 add nullable scheduled decision-reason
+> history and live CDT aggregation audit fields to the donor console contracts.
+> Old D1 rows remain unknown. The release verification packet is documentation;
+> it does not authorize or dispatch PRE-FLIGHT/RELEASE.
+
 ## 1. Scope
 
 This SPEC defines the observable behaviour of the Cloudflare Worker. It is the
@@ -255,8 +260,11 @@ $$\text{trafficBytes} = \sum_{i} \texttt{TrafficDetails}[i].\texttt{Traffic}$$
 
 All entries are summed. When `BUSINESS_REGION_ID` is configured it is applied as a
 server-side request parameter, not as a client-side filter, so that the sum always
-reflects what the API returned. The per-region breakdown SHOULD be included in the
-webhook payload and dashboard so the summation scope remains auditable (PLAN Q1).
+reflects what the API returned. The live query, donor status card, and scheduled
+webhook expose the all-entry scope and `BusinessRegionId` totals from those actual
+entries. Missing region identifiers remain `null`. These are CDT business regions
+under one configured credential set; they are not ECS regions or multiple accounts.
+Historical D1 rows retain total-only traffic because per-entry data is not stored.
 
 There is **no pagination**. This replaces the originating brief's pagination
 requirement; multi-entry summation over `TrafficDetails` is the substitute test
@@ -442,6 +450,14 @@ already fixed before dispatch begins.
   "ecsStatusBefore": "running",
   "ecsStatusAfter": "stopped",
   "action": "stop",
+  "decisionReason": "traffic 123.45 GB has reached threshold 180 GB; instance is \"running\", so a stop is required",
+  "trafficAggregation": {
+    "unit": "bytes",
+    "summationScope": "all TrafficDetails entries",
+    "totalBytes": 132553428173,
+    "entries": [{"businessRegionId": "cn-hongkong", "ispType": "CMI", "trafficBytes": 132553428173}],
+    "byBusinessRegion": [{"businessRegionId": "cn-hongkong", "trafficBytes": 132553428173, "entryCount": 1}]
+  },
   "stoppedModeRequested": "KeepCharging",
   "instanceId": "i-xxxxxxxx",
   "region": "cn-hongkong",
@@ -449,6 +465,11 @@ already fixed before dispatch begins.
   "durationMs": 812
 }
 ```
+
+`decisionReason` is included only after `decide()` produced a reason. The
+`trafficAggregation` audit is included only when a valid CDT reading exists.
+`region` remains the configured ECS `REGION_ID`; `trafficAggregation` uses CDT
+`BusinessRegionId` values and contains no account identifiers.
 
 `stoppedModeRequested` is present only when a stop was issued, and records the mode
 that was **requested** in the request — never a claim that it was applied. Per §6.4,
@@ -476,6 +497,10 @@ immediate follow-up describe and MAY legitimately be `starting` or `stopping`;
   "durationMs": 340
 }
 ```
+
+An error payload may include `decisionReason` or `trafficAggregation` when the run
+established those values before the error. They are omitted otherwise. A missing
+reason is never reconstructed from an error message.
 
 `stage` ∈ {`config`, `cdt-query`, `ecs-describe`, `ecs-start`, `ecs-stop`,
 `webhook`, `unexpected`}. The HTTP surface adds no new stages; failures on the manual
@@ -511,7 +536,7 @@ control outcome. When absent, the transport is not called.
 | Method | Path | Auth | Behaviour |
 | --- | --- | --- | --- |
 | `GET` | `/health` | **Public** | `200` with a small JSON liveness body. |
-| `GET` | `/` | Required | Server-rendered dashboard (§8.4). |
+| `GET` | `/` | Required | Donor console served from Workers Static Assets (§8.4). |
 | `GET` | `/api/history` | Required | Bounded monitoring history (§9.5). |
 | `POST` | `/api/query` | Required | Live read-only query (§8.5). |
 
@@ -548,32 +573,16 @@ forgets to set the secret gets a locked door, not an open one.
 
 ### 8.4 Dashboard content
 
-The dashboard is served from the **same** Worker as server-rendered HTML. No frontend
-framework, no build step, and no separate deployment.
+The donor console is served from the same Worker through the `ASSETS` binding. It
+shows one configured ECS instance with current traffic and threshold in GB, usage
+percentage, current ECS status, read-only query target state, and the live decision
+reason. It also displays the all-entry CDT summation scope and actual
+`BusinessRegionId` byte totals. Its history view uses real traffic samples and shows
+recent scheduled reasons from D1; pre-migration reasons stay visibly unknown.
 
-It MUST display at least:
-
-| Field |
-| --- |
-| Current CDT traffic (GB) |
-| Configured threshold (GB) |
-| Usage percentage |
-| Remaining traffic before threshold |
-| Current ECS state |
-| Desired ECS state |
-| Last decision and its reason |
-| Last action |
-| ECS state before |
-| ECS state after |
-| Last scheduled execution time |
-| Execution success/failure |
-| Webhook attempt result |
-| History persistence result, where available in the current response |
-| Execution duration |
-
-All dynamic values MUST be HTML-escaped on render. The dashboard performs no
-privileged operation merely by being rendered, and MUST NOT embed a secret, token, or
-credential-bearing URL in the document.
+The donor console performs no privileged operation merely by being rendered, and
+MUST NOT embed a secret, token, or credential-bearing URL in the document. Dynamic
+reason and region values are rendered as text, not HTML.
 
 ### 8.5 Manual query — strictly read-only
 
@@ -586,6 +595,11 @@ credential-bearing URL in the document.
 It then returns those results. **It MUST NOT invoke `StartInstance` or
 `StopInstance`.** Both operations MUST be unreachable from every HTTP route; a test
 MUST assert that neither was called.
+
+When the CDT reading is valid, the response includes `reason` from `decide()` and a
+`trafficAggregation` object: byte unit, explicit all-`TrafficDetails` summation
+scope, the actual entries, and totals grouped by CDT `BusinessRegionId`. Missing
+identifiers are `null`; the response does not synthesize regions or account rows.
 
 The endpoint exists to power "Query now" / "Refresh" on the dashboard, so an operator
 can observe current state without waiting for the next Cron tick. It deliberately stops
@@ -631,6 +645,7 @@ Binding `TRAFFIC_DB`, table `traffic_checks`, introduced by a versioned migratio
 | `desired_ecs_state` | TEXT | |
 | `action` | TEXT | |
 | `ecs_status_after` | TEXT | Null when no mutation or no follow-up describe. |
+| `decision_reason` | TEXT | Nullable. Set only when `decide()` produced a reason; rows written before migration and runs that never reached a decision remain NULL. Added by `0002_decision_reason.sql`; no backfill. |
 | `control_ok` | INTEGER | Boolean. |
 | `webhook_attempted` | INTEGER | Boolean. |
 | `webhook_ok` | INTEGER | Boolean; null when not attempted. |
@@ -667,6 +682,8 @@ enumerated values in §7.4; unrecognised internal errors map to `unexpected`.
   parameter MUST be clamped rather than honoured,
 - is read-only: it MUST NOT write, migrate, or mutate anything,
 - returns JSON; it does not render HTML.
+- includes `decision_reason` as NULL for old or otherwise unknown rows; no reason is
+  reconstructed from the status, action, or error text.
 
 ### 9.6 Failure isolation
 
@@ -775,12 +792,16 @@ any existing test of that kind MUST be removed rather than re-pinned.
 | A11 | D1 write failure does not alter the control outcome | D1 isolation tests |
 | A12 | Protected routes deny unauthenticated and malformed requests | Auth tests |
 | A13 | `decision()` is pure and unit-testable without mocks | Decision purity tests |
+| A14 | Decision reasons are persisted only when produced; earlier D1 rows remain NULL | Migration + history tests |
+| A15 | Audit scope names every returned `TrafficDetails` entry and groups only actual CDT regions | Query + webhook + adapter tests |
 
 ## 14. Open questions
 
-Q1 and Q3 from the PLAN remain open and are resolved by configuration defaults rather
-than by assumptions baked into code: summation scope (Q1) and region identifier
-namespace (Q3). **Q4 (Cloudflare plan), Q5 (history retention), and Q6 (repository
+Q1's implementation choice is to sum every returned `TrafficDetails` entry and
+expose its actual CDT business-region breakdown (§5.3). Its external meaning still
+requires comparison with the CDT console before enforcement is trusted (A5). Q3's
+identifier namespace remains empirically unconfirmed; ECS `REGION_ID` and CDT
+`BusinessRegionId` stay separate fields. **Q4 (Cloudflare plan), Q5 (history retention), and Q6 (repository
 visibility / branch protection)** are resolved by owner decision (2026-09-22): the
 project stays on the Workers Free plan; its CPU allowance is platform-applied, and
 the first natural Cron measured `cpuTimeMs` 9, so Workers Free remains the

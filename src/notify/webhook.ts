@@ -16,6 +16,7 @@
 
 import type { DecisionAction } from "../monitor/decision";
 import type { ErrorStage } from "../monitor/execute";
+import type { TrafficAggregationAudit } from "../aliyun/api";
 import { RpcError } from "../aliyun/rpc";
 import { redact } from "../redact";
 import type { FetchLike } from "../aliyun/rpc";
@@ -29,6 +30,8 @@ export interface RunReportLike {
   readonly ecsStatusAfter: string | undefined;
   readonly desired: "running" | "stopped" | undefined;
   readonly action: DecisionAction | undefined;
+  readonly decisionReason?: string | undefined;
+  readonly trafficAggregation?: TrafficAggregationAudit | undefined;
   readonly stoppedModeRequested: "StopCharging" | "KeepCharging" | undefined;
   readonly instanceId: string;
   readonly region: string;
@@ -66,6 +69,8 @@ export interface SuccessPayload {
   readonly region: string;
   readonly time: string;
   readonly durationMs: number;
+  readonly decisionReason?: string;
+  readonly trafficAggregation?: TrafficAggregationAudit;
   /** Present only when a stop was issued. Reports the mode *requested*. */
   readonly stoppedModeRequested?: "StopCharging" | "KeepCharging";
 }
@@ -80,6 +85,8 @@ export interface ErrorPayload {
   readonly region: string;
   readonly time: string;
   readonly durationMs: number;
+  readonly decisionReason?: string;
+  readonly trafficAggregation?: TrafficAggregationAudit;
 }
 
 export type WebhookPayload = SuccessPayload | ErrorPayload;
@@ -102,6 +109,10 @@ export function buildPayload(report: RunReportLike): WebhookPayload {
       region: report.region,
       time: report.time,
       durationMs: report.durationMs,
+      ...(report.decisionReason === undefined ? {} : { decisionReason: report.decisionReason }),
+      ...(report.trafficAggregation === undefined
+        ? {}
+        : { trafficAggregation: report.trafficAggregation }),
     };
   }
 
@@ -116,6 +127,10 @@ export function buildPayload(report: RunReportLike): WebhookPayload {
     region: report.region,
     time: report.time,
     durationMs: report.durationMs,
+    ...(report.decisionReason === undefined ? {} : { decisionReason: report.decisionReason }),
+    ...(report.trafficAggregation === undefined
+      ? {}
+      : { trafficAggregation: report.trafficAggregation }),
   };
 
   // Omitted entirely when no stop was issued, so a no-op run cannot imply one.

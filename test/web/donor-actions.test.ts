@@ -22,6 +22,7 @@ function row(overrides: Partial<HistoryRow> = {}): HistoryRow {
     webhook_ok: null,
     error_stage: null,
     error_message: null,
+    decision_reason: null,
     duration_ms: 42,
     ...overrides,
   };
@@ -36,6 +37,21 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       ecsStatus: "Running",
       desired: "running",
       action: "none-running",
+      reason:
+        'traffic 12.5 GB is below threshold 20 GB; instance is already "running", so no action is required',
+      trafficAggregation: {
+        unit: "bytes",
+        summationScope: "all TrafficDetails entries",
+        totalBytes: 12.5 * 1024 ** 3,
+        entries: [
+          { businessRegionId: "cn-hongkong", ispType: "CMI", trafficBytes: 6 * 1024 ** 3 },
+          { businessRegionId: "cn-beijing", ispType: null, trafficBytes: 6.5 * 1024 ** 3 },
+        ],
+        byBusinessRegion: [
+          { businessRegionId: "cn-hongkong", trafficBytes: 6 * 1024 ** 3, entryCount: 1 },
+          { businessRegionId: "cn-beijing", trafficBytes: 6.5 * 1024 ** 3, entryCount: 1 },
+        ],
+      },
       mutation: false,
     });
 
@@ -48,6 +64,14 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       percentageOfUse: 62.5,
       thresholdReached: false,
       instanceStatus: "Running",
+      decision_desired: "running",
+      decision_reason:
+        'traffic 12.5 GB is below threshold 20 GB; instance is already "running", so no action is required',
+      traffic_summation_scope: "all TrafficDetails entries",
+      traffic_by_business_region: [
+        { businessRegionId: "cn-hongkong", trafficBytes: 6 * 1024 ** 3, entryCount: 1 },
+        { businessRegionId: "cn-beijing", trafficBytes: 6.5 * 1024 ** 3, entryCount: 1 },
+      ],
     });
     expect(result.data[0]).not.toHaveProperty("accounts");
     expect(JSON.stringify(result)).not.toContain("ADMIN_TOKEN");
@@ -94,6 +118,10 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       percentageOfUse: null,
       thresholdReached: null,
       instanceStatus: "Unknown",
+      decision_desired: null,
+      decision_reason: null,
+      traffic_summation_scope: null,
+      traffic_by_business_region: [],
     });
   });
 });
@@ -117,6 +145,27 @@ describe("adaptDonorHistory — bounded honest chart series", () => {
       { time: "2026-09-26T11:50:00.000Z", value: 3 },
     ]);
     expect(result.data.history_30d).toEqual([{ date: "2026-09-26", value: 3 }]);
+  });
+
+  it("exposes recent scheduled reasons and preserves unknown reasons as null", () => {
+    const result = adaptDonorHistory(
+      [
+        row({
+          checked_at: "2026-09-26T11:10:00.000Z",
+          decision_reason: "observed decision reason",
+        }),
+        row({ id: 2, checked_at: "2026-09-26T11:00:00.000Z", decision_reason: null, action: null }),
+      ],
+      now,
+    );
+    expect(result.data.decision_history).toEqual([
+      {
+        time: "2026-09-26T11:10:00.000Z",
+        action: "none-running",
+        reason: "observed decision reason",
+      },
+      { time: "2026-09-26T11:00:00.000Z", action: null, reason: null },
+    ]);
   });
 
   it("limits the adapter to the newest 200 rows", () => {
@@ -145,9 +194,9 @@ describe("adaptDonorHistory — bounded honest chart series", () => {
     expect(empty).toEqual({
       success: true,
       mutation: false,
-      data: { history_24h: [], history_30d: [] },
+      data: { history_24h: [], history_30d: [], decision_history: [] },
     });
-    expect(unknown.data).toEqual({ history_24h: [], history_30d: [] });
+    expect(unknown.data).toMatchObject({ history_24h: [], history_30d: [] });
   });
 
   it("omits rows outside the supported 24-hour and 30-day windows", () => {

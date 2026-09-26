@@ -64,7 +64,7 @@ const CdtResponse = z
 export interface TrafficBreakdownEntry {
   readonly businessRegionId: string | undefined;
   readonly ispType: string | undefined;
-  readonly bytes: number | undefined;
+  readonly bytes: number;
 }
 
 export interface TrafficReading {
@@ -80,6 +80,59 @@ export interface TrafficReading {
    */
   readonly totalBytes: number;
   readonly entries: readonly TrafficBreakdownEntry[];
+}
+
+/** Audit fields derived only from the actual CDT response entries. */
+export interface TrafficAggregationAudit {
+  readonly unit: "bytes";
+  readonly summationScope: "all TrafficDetails entries";
+  readonly totalBytes: number;
+  readonly entries: readonly {
+    readonly businessRegionId: string | null;
+    readonly ispType: string | null;
+    readonly trafficBytes: number;
+  }[];
+  readonly byBusinessRegion: readonly {
+    readonly businessRegionId: string | null;
+    readonly trafficBytes: number;
+    readonly entryCount: number;
+  }[];
+}
+
+/**
+ * Make the reducer's actual all-entry total auditable to web and webhook
+ * consumers. A missing `BusinessRegionId` remains `null`; entries are not
+ * grouped into accounts or inferred from the ECS region.
+ */
+export function auditTrafficAggregation(reading: TrafficReading): TrafficAggregationAudit {
+  const entries = reading.entries.map((entry) => ({
+    businessRegionId: entry.businessRegionId ?? null,
+    ispType: entry.ispType ?? null,
+    trafficBytes: entry.bytes,
+  }));
+  const regions = new Map<
+    string | null,
+    { businessRegionId: string | null; trafficBytes: number; entryCount: number }
+  >();
+
+  for (const entry of entries) {
+    const current = regions.get(entry.businessRegionId) ?? {
+      businessRegionId: entry.businessRegionId,
+      trafficBytes: 0,
+      entryCount: 0,
+    };
+    current.trafficBytes += entry.trafficBytes;
+    current.entryCount += 1;
+    regions.set(entry.businessRegionId, current);
+  }
+
+  return {
+    unit: "bytes",
+    summationScope: "all TrafficDetails entries",
+    totalBytes: reading.totalBytes,
+    entries,
+    byBusinessRegion: [...regions.values()],
+  };
 }
 
 /**

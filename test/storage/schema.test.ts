@@ -92,6 +92,7 @@ const SPEC_COLUMNS: readonly (readonly [string, string, boolean])[] = [
   ["desired_ecs_state", "TEXT", true],
   ["action", "TEXT", true],
   ["ecs_status_after", "TEXT", true],
+  ["decision_reason", "TEXT", true],
   ["control_ok", "INTEGER", true],
   ["webhook_attempted", "INTEGER", true],
   ["webhook_ok", "INTEGER", true],
@@ -154,6 +155,35 @@ describe("traffic_checks schema — columns match SPEC §9.3", () => {
       sql: string;
     };
     expect(ddl.sql.toUpperCase()).toContain("AUTOINCREMENT");
+  });
+});
+
+describe("decision_reason migration — unknown history stays unknown", () => {
+  it("adds a nullable column and leaves pre-migration rows NULL", () => {
+    const db = new DatabaseSync(":memory:");
+    databases.push(db);
+    const migrations = migrationFiles();
+    const initial = migrations.find(({ name }) => name === "0001_traffic_checks.sql");
+    const reason = migrations.find(({ name }) => name === "0002_decision_reason.sql");
+    expect(initial).toBeDefined();
+    expect(reason).toBeDefined();
+    if (initial === undefined || reason === undefined) return;
+
+    db.exec(initial.sql);
+    db.prepare(
+      `INSERT INTO traffic_checks (checked_at, trigger, status, threshold_gb, duration_ms)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("2026-09-22T00:00:00Z", "scheduled", "success", 180, 1);
+
+    db.exec(reason.sql);
+    const column = columns(db, "traffic_checks").find((item) => item.name === "decision_reason");
+    expect(column?.type).toBe("TEXT");
+    expect(column?.notnull).toBe(0);
+
+    const row = db.prepare("SELECT decision_reason FROM traffic_checks").get() as {
+      decision_reason: string | null;
+    };
+    expect(row.decision_reason).toBeNull();
   });
 });
 

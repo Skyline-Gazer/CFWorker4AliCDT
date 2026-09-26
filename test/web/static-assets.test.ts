@@ -30,6 +30,9 @@ describe("donor static asset import", () => {
     expect(html).toContain("echarts.min.js");
     expect(html).toContain("?action=control_instance");
     expect(html).toContain("?action=get_history");
+    expect(html).toContain("item.decision_reason");
+    expect(html).toContain("item.traffic_summation_scope");
+    expect(html).toContain("currentChartData.decision_history");
   });
 
   it("unlocks through Authorization without persisting or posting the admin token", () => {

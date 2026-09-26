@@ -398,6 +398,7 @@ describe("route — dispatch with valid credentials", () => {
             webhook_ok: null,
             error_stage: null,
             error_message: null,
+            decision_reason: "measured reason",
             duration_ms: 1,
           },
           {
@@ -418,6 +419,7 @@ describe("route — dispatch with valid credentials", () => {
             webhook_ok: null,
             error_stage: "cdt-query",
             error_message: null,
+            decision_reason: null,
             duration_ms: 1,
           },
         ]);

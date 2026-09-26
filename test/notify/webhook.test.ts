@@ -80,6 +80,28 @@ describe("buildPayload — success (SPEC §7.3)", () => {
     });
   });
 
+  it("includes an available reason and actual traffic aggregation audit", () => {
+    const payload = buildPayload({
+      ...SUCCESS,
+      decisionReason: "measured decision reason",
+      trafficAggregation: {
+        unit: "bytes",
+        summationScope: "all TrafficDetails entries",
+        totalBytes: 7,
+        entries: [{ businessRegionId: "cn-hongkong", ispType: null, trafficBytes: 7 }],
+        byBusinessRegion: [{ businessRegionId: "cn-hongkong", trafficBytes: 7, entryCount: 1 }],
+      },
+    });
+    expect(payload).toMatchObject({
+      decisionReason: "measured decision reason",
+      trafficAggregation: {
+        summationScope: "all TrafficDetails entries",
+        totalBytes: 7,
+        byBusinessRegion: [{ businessRegionId: "cn-hongkong", trafficBytes: 7 }],
+      },
+    });
+  });
+
   it("omits stoppedModeRequested when no stop was issued", () => {
     const payload = buildPayload({
       ...SUCCESS,
@@ -122,6 +144,11 @@ describe("buildPayload — error (SPEC §7.4)", () => {
       time: "2026-09-22T00:00:00Z",
       durationMs: 340,
     });
+  });
+
+  it("does not create a reason when the run failed before deciding", () => {
+    expect(buildPayload(ERROR)).not.toHaveProperty("decisionReason");
+    expect(buildPayload(ERROR)).not.toHaveProperty("trafficAggregation");
   });
 
   it("omits success-only fields on an error payload", () => {
