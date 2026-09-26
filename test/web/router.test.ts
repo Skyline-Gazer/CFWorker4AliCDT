@@ -225,7 +225,7 @@ describe("route — dispatch with valid credentials", () => {
     let historyCalls = 0;
     let requestedLimit: number | undefined;
     const { deps, counts } = harness({
-      history: async (limit) => {
+      history: (limit) => {
         historyCalls += 1;
         requestedLimit = limit;
         return [historyRow];

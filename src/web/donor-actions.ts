@@ -144,7 +144,7 @@ export function adaptDonorLogs(rows: readonly HistoryRow[]): DonorLogsResponse {
       id: row.id,
       time: row.checked_at,
       level: row.status === "error" ? "error" : "info",
-      message: row.decision_reason || row.action || row.status,
+      message: row.decision_reason ?? row.action ?? row.status,
       trigger: row.trigger,
       status: row.status,
       traffic_gb: row.traffic_gb,
