@@ -23,6 +23,16 @@ No deployment has been performed and no live Alibaba Cloud call has been made. I
 that can only be closed by real runtime observation are marked
 `BLOCKED_BY_LIVE_DEPLOYMENT` rather than closed.
 
+> **Amendment (2026-09-26), CPU and plan only.** Production RELEASE
+> [36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416)
+> at `106f4d214a883ac9bfdf0798110f845092fbe971` has since passed. The first natural
+> Cron (`2026-09-25T16:50:28Z`, `*/10 * * * *`, count 1, custom domain `cdt.q9m3.com`)
+> measured `cpuTimeMs` **9** (success / ok, action `none-running`, D1 history write
+> yes, `webhook_attempted=false`). **R8** in §1, the CPU rows in §5, finding 5, and
+> the CPU step in §7 record that measurement. **Required plan: Workers Free.** Paid
+> is not required solely by this single-run observation. The rest of this review is
+> unchanged, including the release-state flags in §6.
+
 ## 1. PLAN risks R1–R12
 
 | Risk | Status | Evidence | Residual risk | Follow-up |
@@ -34,7 +44,7 @@ that can only be closed by real runtime observation are marked
 | **R5** — Conversion remains aligned with the CDT GB display | **MITIGATED IN CODE; DEPLOYMENT CHECK PENDING** | `test/aliyun/api.test.ts` pins `1024^3`, exact conversion at 180 GB, and the owner-provided `27,858,630`-byte example (`0.02594537 GB`, console `0.02595 GB`). The README documents that the public label remains GB and the divisor is not `10^9`. | The deployed Worker still requires comparison against CDT for the same period. The threshold default remains `180` with no compensation. | — |
 | **R6** — Asynchronous ECS operations | **MITIGATED** | Exactly one immediate follow-up describe, no polling. `test/monitor/execute.test.ts` asserts one follow-up and that a transitional result (`starting`) is preserved as observed. | None. | — |
 | **R7** — `StoppedMode` silently ignored | **MITIGATED** | `ForceStop` pinned `"false"` at one call site (`src/aliyun/api.ts`); mode reported as **requested**, never applied. `test/aliyun/api.test.ts` asserts the result is `{ requested: true }` and not `{ applied: true }`; `test/monitor/execute.test.ts` asserts what is sent equals what is recorded. | Billing behaviour still depends on instance support, which is not observable. No logic branches on it. | — |
-| **R8** — Free platform CPU allowance / Workers plan | **OPEN — BLOCKED_BY_LIVE_DEPLOYMENT** | No measurement exists. `docs/operations/deployment.md` §7 states Cron `cpuTime` as **pending**, explains that Free applies its allowance automatically, and gives the post-RELEASE measurement method. Retries are bounded; no long-polling. | A run exceeding the 10 ms platform allowance may be terminated mid-flight. It aborts **safely** (no mutation) but reports nothing. | **#28** |
+| **R8** — Free platform CPU allowance / Workers plan | **MEASURED — Workers Free** | First natural Cron `2026-09-25T16:50:28Z` on RELEASE `106f4d214a883ac9bfdf0798110f845092fbe971` ([run 36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416), PASS) measured `cpuTimeMs` **9**, within the Workers Free 10 ms allowance. Outcome success / ok; action `none-running`; D1 history write yes; `webhook_attempted=false`. Cron `*/10 * * * *`, count 1; custom domain `cdt.q9m3.com`. Recorded in `docs/operations/deployment.md` §7. Paid is not required solely by this single-run observation. Retries are bounded; no long-polling; custom `limits.cpu_ms` stays omitted. | A later run above 10 ms CPU may still be terminated mid-flight. It aborts **safely** (no mutation) but reports nothing. | deployment.md §7 |
 | **R9** — Log persistence / secret leakage | **MITIGATED** | Single redaction boundary (`src/redact.ts`), consumed by rpc, webhook, storage, dashboard, query, router. `test/redaction-surfaces.test.ts` asserts the same credential cannot escape **any** of the four destinations via real module paths, and that every module exporting `redact` exports the same function **by reference**. | None identified. | — |
 | **R10** — CI/test performing a live mutation | **MITIGATED** | CI holds no credentials and runs no deploy (`.github/workflows/ci.yml`); all network I/O is mocked; deployment is manual and gated. | None. | — |
 | **R11** — Branch protection unenforceable | **MITIGATED** | Repository is public; protection **enabled and verified**: PR required, `Format, lint, typecheck, test` required, admin enforcement on, force-push and deletion blocked. All four acceptance behaviours were demonstrated live on Issue #15 (direct push rejected `GH006`; failing-CI merge refused as `BLOCKED`; passing CI merged; force-push rejected). | None. | #15 (closed) |
@@ -91,7 +101,7 @@ it is backed by a reachability proof, not only a test.
 | 2 | `ApiContext` carried no `signatureVersion`, so a validated `SIGNATURE_VERSION` was silently ignored (`callRpc` always used `v3`). SPEC §4.1 requires the method be selectable because the operation is undocumented. | **fixed** — PR #62 |
 | 3 | The first log-surface redaction test hand-rolled a console call with a raw string instead of exercising module paths, so it verified nothing. | **fixed** — PR #63 |
 | 4 | A branch for #44 was built from an earlier `main` and would have **silently reverted** the P6 phase-review pin. | **fixed** — caught before merge; branch rebuilt from current `main` |
-| 5 | Deployment docs could have satisfied their criterion text with an invented CPU figure. | **not_applicable** — stated as pending with the derivation, because only a deployment can produce it |
+| 5 | Deployment docs could have satisfied their criterion text with an invented CPU figure. | **not_applicable at review time** — stated as pending because only a deployment can produce it. **Subsequently recorded** from the first natural Cron: `cpuTimeMs` 9, required plan Workers Free (`docs/operations/deployment.md` §7). |
 | 6 | `threshold_gb` is written without a finiteness guard. | **deferred_non_blocking** — unreachable from `loadConfig`, which rejects non-finite and non-positive thresholds |
 | 7 | Repo-wide credential scan returns hits. | **not_applicable** — all are deliberately fake test fixtures used as redaction oracles |
 
@@ -99,16 +109,26 @@ it is backed by a reachability proof, not only a test.
 
 ## 5. Open and deployment-gated items
 
-These are **not** closed by this review. Each requires a live deployment or an owner
-action.
+### CPU and plan, recorded after this review
 
-| Item | Why it is open |
+The review below was written before production RELEASE. The first natural Cron has
+since been measured, and that measurement is what the plan requirement uses.
+
+| Item | Record |
 | --- | --- |
-| **#28** — measured CPU per run | Requires a successful RELEASE and a Cron observation; the measurement does not exist yet |
-| **#31** — final Cloudflare plan statement | Remains pending until the #28 measurement is available and the owner chooses the plan conclusion |
+| **#28** — measured CPU per run | `cpuTimeMs` **9** at `2026-09-25T16:50:28Z` on RELEASE `106f4d214a883ac9bfdf0798110f845092fbe971` ([run 36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416), PASS). Required plan: Workers Free. Redaction, the other part of this issue, was already mitigated (R9, A5). |
+| **#31** — Cloudflare plan statement | `docs/operations/deployment.md` §7 cites `cpuTimeMs` 9 and states Workers Free as the required plan. Paid is not required solely by this single-run observation. |
+| **R8** — CPU budget | Measured. 9 ms is within the Workers Free 10 ms allowance. Custom `limits.cpu_ms` stays omitted. |
+
+### Still outstanding
+
+These still require a live observation or an owner action. The CPU measurement above
+does not settle them.
+
+| Item | Why it remains outstanding |
+| --- | --- |
 | **#47** — deployment workflow, protected environment, ordered remote migration | Requires creating remote resources; owner-gated |
 | **R2, R3, R4** — endpoint, accepted signature method, traffic unit | Empirically unconfirmable without a live call |
-| **R8** — CPU budget | See #28 |
 | **R12** — D1 behaviour under real load | Requires a remote database |
 
 ## 6. Release state
@@ -133,9 +153,10 @@ V1_RELEASE_READY=NO
    all seven variables and the three required RELEASE secrets. The optional
    webhook pair is needed only when notification is wanted; a token requires its URL.
 4. **Merge #47** and perform the first deployment.
-5. **Run the first-run verification** (assumptions register §4) and record the
-   measured `cpuTime` as evidence for #28; use it for the owner-reviewed plan
-   conclusion tracked by #31.
+5. **Run the first-run verification** (assumptions register §4). The CPU part of
+   that procedure is recorded: first natural Cron `cpuTimeMs` 9, required plan
+   Workers Free (`docs/operations/deployment.md` §7). The other first-run checks
+   are separate from that recording.
 6. Only then is `V1_RELEASE_READY` claimable.
 
 ## 8. References

@@ -135,15 +135,25 @@ In the meantime: the resolver refuses any output path outside the repository roo
 and the dry-run is run against the generated artifact rather than the committed one.
 
 ### A8 — The required Cloudflare plan
-Evidence: **not yet measured.** The plan is a function of measured CPU per run,
-which requires a deployment.
-How to verify: the Cron invocation's `cpuTime` in Workers observability.
+Evidence: **measured.** The first natural production Cron at `2026-09-25T16:50:28Z`
+(Cron `*/10 * * * *`, count 1) on RELEASE SHA
+`106f4d214a883ac9bfdf0798110f845092fbe971`
+([run 36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416),
+PASS) recorded `cpuTimeMs` **9**. Outcome success / ok; action `none-running`; D1
+history write yes; `webhook_attempted=false`. Custom domain `cdt.q9m3.com`.
+**Required plan: Workers Free.** 9 ms is within the 10 ms Free CPU allowance, so
+Paid is not required solely by this measurement. The gate used is this single
+natural Cron observation. The figure and plan statement are in
+`docs/operations/deployment.md` §7.
+How to verify: the Cron invocation's `cpuTime` in Workers observability. That
+observation is the row above.
 If wrong: on the Free plan a run exceeding 10 ms CPU may be terminated mid-flight.
 **Not fail-safe in the sense that matters**: a terminated run issues no mutation
 (so it aborts safely), but it also reports nothing.
-In the meantime: the owner's decision is to remain on Free initially and measure
-before upgrading; retries are bounded and no long-polling occurs (PLAN R8, Q4
-resolved 2026-09-22).
+In the meantime: remain on Workers Free and omit custom `limits.cpu_ms`. Retries
+are bounded and no long-polling occurs (PLAN R8, Q4 resolved 2026-09-22). A later
+move to Paid / Standard Usage Model still requires measured evidence and an
+explicit owner choice.
 
 ### A9 — `StoppedMode` is silently ignored when unsupported
 Evidence: **documented.** Alibaba states that when an instance does not support
@@ -265,7 +275,9 @@ is a separate owner action that restores `*/10 * * * *`.
    should again be read: confirm the webhook payload agrees with the figures when webhook reporting is configured, or confirm the D1 row records the figures with webhook result NULL when it is not.
    Confirm a below-threshold run is a `none-*` no-op with the instance untouched.
 9. **Measure CPU (A8).** Read the first scheduled invocation's `cpuTime` and record
-   the required plan in the deployment documentation.
+   the required plan in the deployment documentation. Recorded for the first natural
+   Cron at `2026-09-25T16:50:28Z`: `cpuTimeMs` 9; required plan Workers Free
+   (`docs/operations/deployment.md` §7).
 
 Steps 1–7 must be run against the **latest applicable Version URL**. Because
 `wrangler secret put` deploys a new version (A14), re-locate it after the final

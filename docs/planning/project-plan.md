@@ -19,6 +19,11 @@
 > Owner amendment (2026-09-24): generic webhook reporting is optional; when configured
 > it is attempted once per scheduled run, and without it D1 history and ECS control
 > continue normally.
+>
+> Amendment (2026-09-26): the first natural production Cron measured `cpuTimeMs` 9,
+> within the Workers Free 10 ms allowance. Workers Free remains the required plan;
+> Paid is not required solely by that single-run observation. See
+> `docs/operations/deployment.md` §7.
 
 ## 1. Document control
 
@@ -784,7 +789,7 @@ test, implement, make it pass, refactor.
 | R5 | A conversion regression could reintroduce SI decimal GB (`10^9`) and make Worker traffic disagree with the CDT console. | Operators see an inconsistent traffic reading and enforcement evaluates a different scale. | Pin the `1024^3` divisor, the owner-provided `27,858,630`-byte console example, and exact `180 * 1024^3` threshold conversion in tests. Keep `TRAFFIC_THRESHOLD_GB` at `180`. |
 | R6 | Asynchronous ECS operations mean the observed state after a call is transitional, not terminal. | A naive implementation would poll, exceed runtime limits, or report a false final state. | One immediate follow-up describe only. `Starting`/`Stopping` are reported as valid observed states. No long-polling. |
 | R7 | `StoppedMode` is silently ignored for unsupported instances. | Billing behaves differently than configured, with no error. | Pin `StoppedMode` explicitly and document the silent-ignore behaviour; never rely on account defaults. |
-| R8 | Workers Free applies a 10 ms Cron CPU allowance automatically; custom `limits.cpu_ms` is unsupported on Free. | Runs above the platform allowance are terminated mid-flight. | Measure actual Cron `cpuTime` after RELEASE. Remain on Free initially; consider Paid / Standard Usage Model only if measured usage warrants it and the owner chooses it. Configure a custom CPU limit only with that plan and owner choice. |
+| R8 | Workers Free applies a 10 ms Cron CPU allowance automatically; custom `limits.cpu_ms` is unsupported on Free. | Runs above the platform allowance are terminated mid-flight. | Measured on the first natural Cron (`2026-09-25T16:50:28Z`): `cpuTimeMs` 9, within the 10 ms allowance. Workers Free remains the required plan; Paid is not required solely by that single-run observation (`docs/operations/deployment.md` §7). A custom CPU limit still requires Paid / Standard Usage Model and an explicit owner choice. |
 | R9 | Workers Logs persist by default. | Secret leakage into retained logs. | Centralised redaction; secrets never interpolated into log or error strings; tested. |
 | R10 | CI or a test could accidentally perform a live mutation. | Unintended instance stop/start. | All network mocked; no credentials in CI; deployment is manual, environment-gated, and separate from PR CI. |
 | **R11** | **Branch protection** — previously unenforceable (private repo, free org plan, GitHub returned 403). | A direct push to `main` would bypass CI and review. | **Resolved (2026-09-22):** the repository is now public, so the intended ruleset can be applied. Owner instructed it be enabled; tracked by Issue #15. |
@@ -831,12 +836,14 @@ During this revision **no** Issue is created, closed, or edited.
 
 **Resolved by the owner (2026-09-22):**
 
-7. **Q4 — Cloudflare plan.** Remain on the **Free** plan initially; its 10 ms Cron CPU
+7. **Q4 — Cloudflare plan.** Remain on the **Free** plan; its 10 ms Cron CPU
    allowance is applied automatically, and Free deployment configs must omit custom
-   `limits.cpu_ms`. Measure actual Cron `cpuTime` after RELEASE. Consider Paid / Standard
-   Usage Model only if measured usage or risk warrants it and the owner chooses it; any
-   custom CPU limit requires that plan and an explicit owner choice. The required plan
-   conclusion remains pending measurement (§14).
+   `limits.cpu_ms`. The first natural Cron measured `cpuTimeMs` 9, within that
+   allowance, so the required plan is Workers Free
+   (`docs/operations/deployment.md` §7). Paid is not required solely by that
+   single-run observation. Consider Paid / Standard Usage Model only if a later
+   measurement or risk warrants it and the owner chooses it; any custom CPU limit
+   requires that plan and an explicit owner choice.
 8. **Q5 — History retention.** Retain `traffic_checks` rows **indefinitely in v1**; no
    automatic deletion. Pruning remains an explicit operations task if it is later needed.
 9. **Q6 — Repository visibility / plan.** The repository is **public**; branch protection
