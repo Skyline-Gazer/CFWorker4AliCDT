@@ -29,6 +29,7 @@ export interface DonorConfigResponse {
     readonly webhook_method: "POST";
     readonly webhook_content_type: "application/json";
     readonly smtp_configured: boolean;
+    readonly telegram_configured: boolean;
     readonly admin_token_configured: boolean;
     readonly aliyun_credentials_configured: boolean;
   };
@@ -53,6 +54,8 @@ export function adaptDonorConfig(config: Config): DonorConfigResponse {
       webhook_method: "POST",
       webhook_content_type: "application/json",
       smtp_configured: config.smtpHost !== undefined && config.smtpFrom !== undefined,
+      telegram_configured:
+        config.telegramBotToken !== undefined && config.telegramChatId !== undefined,
       admin_token_configured: config.adminToken !== undefined,
       aliyun_credentials_configured: config.accessKeyId !== "" && config.accessKeySecret !== "",
     },
@@ -355,7 +358,6 @@ const ACTION_CODES: ReadonlyMap<string, DonorActionCode> = new Map([
   ["setup", "BACKEND_NOT_AVAILABLE"],
   ["control_instance", "FEATURE_NOT_IMPLEMENTED"],
   ["save_config", "BACKEND_NOT_AVAILABLE"],
-  ["send_test_telegram", "BACKEND_NOT_AVAILABLE"],
   ["clear_logs", "FEATURE_NOT_IMPLEMENTED"],
   ["logout", "FEATURE_NOT_IMPLEMENTED"],
 ]);

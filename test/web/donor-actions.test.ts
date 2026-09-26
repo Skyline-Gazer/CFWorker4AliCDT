@@ -70,6 +70,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         webhook_method: "POST",
         webhook_content_type: "application/json",
         smtp_configured: false,
+        telegram_configured: false,
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -101,6 +102,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
         "webhook_method",
         "webhook_content_type",
         "smtp_configured",
+        "telegram_configured",
       ].sort(),
     );
   });
@@ -120,6 +122,7 @@ describe("adaptDonorConfig — safe allowlist", () => {
       webhook_method: "POST",
       webhook_content_type: "application/json",
       smtp_configured: false,
+      telegram_configured: false,
       admin_token_configured: false,
       aliyun_credentials_configured: true,
     });
@@ -141,6 +144,24 @@ describe("adaptDonorConfig — safe allowlist", () => {
     expect(JSON.stringify(data)).not.toContain("private-smtp-pass");
     expect(JSON.stringify(data)).not.toContain("smtp.example.com");
     expect(JSON.stringify(data)).not.toContain("noreply@example.com");
+  });
+
+  it("reports telegram_configured only when bot token and chat id are present", () => {
+    const parsed = loadConfig({
+      ALIYUN_ACCESS_KEY_ID: "id",
+      ALIYUN_ACCESS_KEY_SECRET: "secret",
+      REGION_ID: "cn-hongkong",
+      ECS_INSTANCE_ID: "i-0123456789abcdef0",
+      TELEGRAM_BOT_TOKEN: "private-bot-token",
+      TELEGRAM_CHAT_ID: "-1009988776655",
+      TELEGRAM_PROXY_URL: "https://proxy.example/private",
+    });
+    if (!parsed.ok) throw new Error("fixture config should validate");
+    const data = adaptDonorConfig(parsed.config).data;
+    expect(data.telegram_configured).toBe(true);
+    expect(JSON.stringify(data)).not.toContain("private-bot-token");
+    expect(JSON.stringify(data)).not.toContain("-1009988776655");
+    expect(JSON.stringify(data)).not.toContain("proxy.example");
   });
 });
 

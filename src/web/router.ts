@@ -89,6 +89,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_billing", "GET"],
   ["send_test_webhook", "POST"],
   ["send_test_email", "POST"],
+  ["send_test_telegram", "POST"],
 ]);
 
 function isKnownPath(path: string): boolean {
@@ -234,6 +235,21 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
       mutation: false,
       code: configured ? "BACKEND_NOT_AVAILABLE" : "SMTP_NOT_CONFIGURED",
       action: "send_test_email",
+    });
+  }
+
+  if (action === "send_test_telegram") {
+    // Ignore browser Telegram credentials; only Worker bindings decide configuration.
+    const parsed = deps.config();
+    if (!parsed.ok) return result(500, "Internal Server Error");
+    const configured =
+      parsed.config.telegramBotToken !== undefined && parsed.config.telegramChatId !== undefined;
+    return jsonResult(501, {
+      success: false,
+      available: false,
+      mutation: false,
+      code: configured ? "BACKEND_NOT_AVAILABLE" : "TELEGRAM_NOT_CONFIGURED",
+      action: "send_test_telegram",
     });
   }
 
