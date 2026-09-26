@@ -121,6 +121,7 @@ describe("route — protected routes require authentication", () => {
     ["GET", "/"],
     ["GET", "/?action=get_config"],
     ["GET", "/?action=get_billing"],
+    ["POST", "/?action=send_test_webhook"],
     ["GET", "/?action=get_logs"],
     ["GET", "/api/history"],
     ["POST", "/api/query"],
@@ -383,7 +384,6 @@ describe("route — dispatch with valid credentials", () => {
       "save_config",
       "send_test_email",
       "send_test_telegram",
-      "send_test_webhook",
       "clear_logs",
       "logout",
     ];
@@ -450,6 +450,8 @@ describe("route — dispatch with valid credentials", () => {
         enable_billing: false,
         webhook_url_configured: true,
         webhook_token_configured: true,
+        webhook_method: "POST",
+        webhook_content_type: "application/json",
         admin_token_configured: true,
         aliyun_credentials_configured: true,
       },
@@ -468,6 +470,8 @@ describe("route — dispatch with valid credentials", () => {
         "aliyun_credentials_configured",
         "webhook_token_configured",
         "webhook_url_configured",
+        "webhook_method",
+        "webhook_content_type",
       ].sort(),
     );
     for (const secret of [
@@ -498,6 +502,8 @@ describe("route — dispatch with valid credentials", () => {
     expect(data.BUSINESS_REGION_ID).toBeNull();
     expect(data.webhook_url_configured).toBe(false);
     expect(data.webhook_token_configured).toBe(false);
+    expect(data.webhook_method).toBe("POST");
+    expect(data.webhook_content_type).toBe("application/json");
     expect(data.admin_token_configured).toBe(false);
     expect(data.aliyun_credentials_configured).toBe(true);
   });
@@ -516,6 +522,58 @@ describe("route — dispatch with valid credentials", () => {
       mutation: false,
       code: "BACKEND_NOT_AVAILABLE",
     });
+  });
+
+  it("fails closed for send_test_webhook when Worker config has no URL", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+        }),
+    });
+    const result = await route(
+      request("POST", "/?action=send_test_webhook", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "WEBHOOK_NOT_CONFIGURED",
+      action: "send_test_webhook",
+    });
+  });
+
+  it("does not use request webhook credentials and leaves manual sending inactive", async () => {
+    const { deps } = harness();
+    const req = new Request("https://worker.test/?action=send_test_webhook", {
+      method: "POST",
+      headers: {
+        authorization: basic("admin", "tok123"),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        webhook: {
+          url: "https://attacker.example/hook?token=body-secret",
+          token: "body-secret",
+        },
+      }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(501);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: false,
+      mutation: false,
+      code: "BACKEND_NOT_AVAILABLE",
+      action: "send_test_webhook",
+    });
+    expect(result.body).not.toContain("body-secret");
+    expect(result.body).not.toContain("hooks.example");
   });
 
   it("keeps authentication as the gate for donor login and never echoes credentials", async () => {

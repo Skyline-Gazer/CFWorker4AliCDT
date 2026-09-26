@@ -87,6 +87,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_logs", "GET"],
   ["get_config", "GET"],
   ["get_billing", "GET"],
+  ["send_test_webhook", "POST"],
 ]);
 
 function isKnownPath(path: string): boolean {
@@ -204,6 +205,21 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     const parsed = deps.config();
     if (!parsed.ok) return result(500, "Internal Server Error");
     return jsonResult(200, adaptDonorConfig(parsed.config));
+  }
+
+  if (action === "send_test_webhook") {
+    // Deliberately ignore the request body: webhook credentials come only from
+    // validated Worker config, and HTTP never invokes the scheduled sender.
+    const parsed = deps.config();
+    if (!parsed.ok) return result(500, "Internal Server Error");
+    return jsonResult(501, {
+      success: false,
+      available: false,
+      mutation: false,
+      code:
+        parsed.config.webhookUrl === undefined ? "WEBHOOK_NOT_CONFIGURED" : "BACKEND_NOT_AVAILABLE",
+      action: "send_test_webhook",
+    });
   }
 
   if (action === "get_billing") {
