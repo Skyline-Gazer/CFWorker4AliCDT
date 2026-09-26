@@ -19,7 +19,7 @@ history while preserving placeholders for unsupported backend capabilities.
 | Authentication | Protected routes accept Basic or Bearer credentials checked against Worker Secret `ADMIN_TOKEN`; the Basic username defaults to `admin`. The page's password field sends the token only as a Bearer `Authorization` header and keeps it in page memory. No JSON password login or server session exists. |
 | `GET /health` | Public liveness response only; it does not disclose configuration. |
 | `GET /` | Authenticated donor dashboard served from Workers Static Assets. |
-| `GET` or `POST /?action=...` | Authenticated donor facade. Login/check-login confirm the existing Authorization gate; status and refresh adapt the read-only query; history adapts a bounded D1 read. Status includes a decision reason and live CDT aggregation audit. History includes up to five recent scheduled reasons, preserving unknown as `null`. Other actions return HTTP 501 JSON with `success: false`, `available: false`, and `mutation: false`. |
+| `GET` or `POST /?action=...` | Authenticated donor facade. Login/check-login confirm the existing Authorization gate; status and refresh adapt the read-only query; history and logs adapt bounded D1 reads. Status includes a decision reason and live CDT aggregation audit. History includes up to five recent scheduled reasons, preserving unknown as `null`. Other actions return HTTP 501 JSON with `success: false`, `available: false`, and `mutation: false`. |
 | `GET /api/history` | Authenticated, bounded, newest-first monitoring rows from D1 `traffic_checks`; maximum 200 rows. `decision_reason` is nullable; older rows remain `null`. |
 | `POST /api/query` | Authenticated live query of traffic and the one configured ECS instance. It returns `reason` from `decide()` and actual `TrafficDetails` aggregation audit, is read-only, and returns `mutation: false`. |
 | ECS mutation | Cron is the only ECS mutation authority. No HTTP route can start, stop, or reboot an instance. |
@@ -36,8 +36,9 @@ business regions are not ECS regions or account identifiers. History includes
 only actual D1 totals and stored reasons; old/missing reasons remain unknown,
 and chart series contain no zero-filled points or inferred regional history.
 `control_instance`, `clear_logs`, and `logout` remain placeholders;
-`check_init`, setup, configuration, logs, and notification actions remain
-unavailable.
+`check_init`, setup, configuration writes, and notification actions remain
+unavailable. The donor logs view is a projection of the same bounded
+`traffic_checks` observations, with stored error text redacted before response.
 
 ## Action matrix
 
@@ -55,7 +56,7 @@ unavailable.
 | `send_test_telegram` | `POST ?action=send_test_telegram`, JSON `{ telegram }` ([L1563](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1563)) | `FUTURE_BACKEND` | No Telegram integration or test-notification endpoint exists. |
 | `send_test_webhook` | `POST ?action=send_test_webhook`, JSON `{ webhook }` ([L1573](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1573)) | `FUTURE_BACKEND` | The optional Worker webhook sends scheduled run reports only. There is no manual test endpoint, and webhook credentials must not be sent from browser code. |
 | `refresh_account` | `POST ?action=refresh_account`, JSON `{ id }` ([L1203](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1203)) | `ADAPTED` | Runs the existing authenticated live query for the singleton. The donor ID is ignored; this path has no Start/Stop call or D1 write and reports `mutation: false`. |
-| `get_logs` | `GET ?action=get_logs&tab=...` ([L1510](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1510)) | `FUTURE_BACKEND` | There is no app log endpoint or action/heartbeat log store. D1 monitoring history is available separately through `GET /api/history`. |
+| `get_logs` | `GET ?action=get_logs&tab=...` ([L1510](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1510)) | `ADAPTED` | Returns up to 200 newest D1 `traffic_checks` observations as donor log entries, using only allowlisted monitoring fields and redacting stored error text. The optional tab is ignored; no separate log store is introduced. |
 | `clear_logs` | `POST ?action=clear_logs`, JSON `{ tab }` ([L1522](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1522)) | `PLACEHOLDER` | Disabled; returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. No delete route exists; D1 observational history is not cleared. |
 | `get_history` | `GET ?action=get_history&id=...` ([L1290](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1290)) | `ADAPTED` | Reads at most the newest 200 D1 rows. The 24-hour series uses actual samples; the 30-day series uses the latest known sample per UTC date. Unknown traffic and missing dates produce no chart point. The response includes up to five newest stored decision reasons; pre-migration and pre-decision rows remain `null`. The donor account ID is ignored. |
 | `logout` | `GET ?action=logout` ([L1427](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html#L1427)) | `PLACEHOLDER` | The server action still returns HTTP 501 and `FEATURE_NOT_IMPLEMENTED`. The UI can clear its page-memory Bearer token, but there is no server session and the browser may retain Basic credentials. |

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { adaptDonorConfig, adaptDonorHistory, adaptDonorStatus } from "../../src/web/donor-actions";
+import {
+  adaptDonorConfig,
+  adaptDonorHistory,
+  adaptDonorLogs,
+  adaptDonorStatus,
+} from "../../src/web/donor-actions";
 import { loadConfig } from "../../src/config";
 import type { HistoryRow } from "../../src/storage/read";
 
@@ -296,5 +301,92 @@ describe("adaptDonorHistory — bounded honest chart series", () => {
       { date: "2026-09-20", value: 2 },
       { date: "2026-09-25", value: 3 },
     ]);
+  });
+});
+
+describe("adaptDonorLogs — bounded safe monitoring entries", () => {
+  it("maps allowlisted fields newest first and redacts stored error text", () => {
+    const result = adaptDonorLogs([
+      row({ id: 1, checked_at: "2026-09-26T10:00:00.000Z", status: "success" }),
+      row({
+        id: 2,
+        checked_at: "2026-09-26T11:00:00.000Z",
+        status: "error",
+        action: null,
+        decision_reason: null,
+        error_stage: "query",
+        error_message: "request failed with ADMIN_TOKEN=private-token",
+      }),
+    ]);
+
+    expect(result).toEqual({
+      success: true,
+      mutation: false,
+      data: [
+        {
+          id: 2,
+          time: "2026-09-26T11:00:00.000Z",
+          level: "error",
+          message: "error",
+          trigger: "scheduled",
+          status: "error",
+          traffic_gb: 1.25,
+          threshold_gb: 180,
+          action: null,
+          decision_reason: null,
+          error_stage: "query",
+          error_message: "request failed with ADMIN_TOKEN=[REDACTED]",
+          duration_ms: 42,
+        },
+        {
+          id: 1,
+          time: "2026-09-26T10:00:00.000Z",
+          level: "info",
+          message: "none-running",
+          trigger: "scheduled",
+          status: "success",
+          traffic_gb: 1.25,
+          threshold_gb: 180,
+          action: "none-running",
+          decision_reason: null,
+          error_stage: null,
+          error_message: null,
+          duration_ms: 42,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("private-token");
+    expect(Object.keys(result.data[0] ?? {}).sort()).toEqual(
+      [
+        "action",
+        "decision_reason",
+        "duration_ms",
+        "error_message",
+        "error_stage",
+        "id",
+        "level",
+        "message",
+        "status",
+        "threshold_gb",
+        "time",
+        "traffic_gb",
+        "trigger",
+      ].sort(),
+    );
+  });
+
+  it("caps output at 200 newest rows", () => {
+    const rows = Array.from({ length: 205 }, (_, index) =>
+      row({
+        id: index + 1,
+        checked_at: new Date(Date.parse("2026-09-26T12:00:00.000Z") - index * 60_000).toISOString(),
+      }),
+    );
+
+    const result = adaptDonorLogs(rows);
+
+    expect(result.data).toHaveLength(200);
+    expect(result.data[0]?.id).toBe(1);
+    expect(result.data.at(-1)?.id).toBe(200);
   });
 });

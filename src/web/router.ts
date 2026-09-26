@@ -24,6 +24,7 @@ import type { AuthConfig } from "./auth";
 import {
   adaptDonorConfig,
   adaptDonorHistory,
+  adaptDonorLogs,
   adaptDonorStatus,
   unsupportedDonorAction,
 } from "./donor-actions";
@@ -79,6 +80,7 @@ const ADAPTED_DONOR_METHODS: ReadonlyMap<string, string> = new Map([
   ["get_status", "GET"],
   ["refresh_account", "POST"],
   ["get_history", "GET"],
+  ["get_logs", "GET"],
   ["get_config", "GET"],
 ]);
 
@@ -185,6 +187,12 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     // The donor chart receives at most the newest 200 D1 observations.
     const rows = await deps.history(200);
     return jsonResult(200, adaptDonorHistory(rows));
+  }
+
+  if (action === "get_logs") {
+    // Logs are the same bounded monitoring observations, not a separate store.
+    const rows = await deps.history(200);
+    return jsonResult(200, adaptDonorLogs(rows));
   }
 
   if (action === "get_config") {

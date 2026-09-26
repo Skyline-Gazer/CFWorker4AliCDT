@@ -8,6 +8,7 @@
 
 import type { HistoryRow } from "../storage/read";
 import type { Config } from "../config";
+import { redact } from "../redact";
 
 /** Explicit allowlist for the authenticated donor config read response. */
 export interface DonorConfigResponse {
@@ -104,6 +105,58 @@ export interface DonorHistoryResponse {
 
 const MAX_DONOR_HISTORY_ROWS = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface DonorLogEntry {
+  readonly id: number;
+  readonly time: string;
+  readonly level: "error" | "info";
+  readonly message: string;
+  readonly trigger: string;
+  readonly status: string;
+  readonly traffic_gb: number | null;
+  readonly threshold_gb: number;
+  readonly action: string | null;
+  readonly decision_reason: string | null;
+  readonly error_stage: string | null;
+  readonly error_message: string | null;
+  readonly duration_ms: number | null;
+}
+
+export interface DonorLogsResponse {
+  readonly success: true;
+  readonly mutation: false;
+  readonly data: readonly DonorLogEntry[];
+}
+
+/** Project bounded D1 observations into the donor's safe, read-only log view. */
+export function adaptDonorLogs(rows: readonly HistoryRow[]): DonorLogsResponse {
+  const newestFirst = [...rows]
+    .sort((left, right) => {
+      const byTime = Date.parse(right.checked_at) - Date.parse(left.checked_at);
+      return Number.isNaN(byTime) || byTime === 0 ? right.id - left.id : byTime;
+    })
+    .slice(0, MAX_DONOR_HISTORY_ROWS);
+
+  return {
+    success: true,
+    mutation: false,
+    data: newestFirst.map((row) => ({
+      id: row.id,
+      time: row.checked_at,
+      level: row.status === "error" ? "error" : "info",
+      message: row.decision_reason ?? row.action ?? row.status,
+      trigger: row.trigger,
+      status: row.status,
+      traffic_gb: row.traffic_gb,
+      threshold_gb: row.threshold_gb,
+      action: row.action,
+      decision_reason: row.decision_reason,
+      error_stage: row.error_stage,
+      error_message: row.error_message === null ? null : redact(row.error_message),
+      duration_ms: row.duration_ms,
+    })),
+  };
+}
 
 function finiteNonNegative(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -260,7 +313,6 @@ const ACTION_CODES: ReadonlyMap<string, DonorActionCode> = new Map([
   ["send_test_email", "BACKEND_NOT_AVAILABLE"],
   ["send_test_telegram", "BACKEND_NOT_AVAILABLE"],
   ["send_test_webhook", "BACKEND_NOT_AVAILABLE"],
-  ["get_logs", "BACKEND_NOT_AVAILABLE"],
   ["clear_logs", "FEATURE_NOT_IMPLEMENTED"],
   ["logout", "FEATURE_NOT_IMPLEMENTED"],
 ]);
