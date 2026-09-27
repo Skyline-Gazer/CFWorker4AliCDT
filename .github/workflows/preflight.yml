@@ -160,6 +160,7 @@ jobs:
           SIGNATURE_VERSION: ${{ vars.SIGNATURE_VERSION }}
           STOPPED_MODE: ${{ vars.STOPPED_MODE }}
           ENABLE_BILLING: ${{ vars.ENABLE_BILLING }}
+          ENABLE_MANUAL_WEBHOOK_TEST: ${{ vars.ENABLE_MANUAL_WEBHOOK_TEST }}
         run: node scripts/resolve-deploy-config.mjs --mode preflight
 
       # Ordered first, deliberately: the schema must exist before a Worker version

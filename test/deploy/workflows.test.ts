@@ -282,6 +282,7 @@ describe("PRE-FLIGHT cannot enable Cron", () => {
       "SIGNATURE_VERSION",
       "STOPPED_MODE",
       "ENABLE_BILLING",
+      "ENABLE_MANUAL_WEBHOOK_TEST",
     ]) {
       expect(resolverStep?.env, name).toHaveProperty(name);
     }
@@ -378,6 +379,7 @@ describe("RELEASE carries the required gates", () => {
         REGION_ID: "${{ vars.REGION_ID }}",
         ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
         ENABLE_BILLING: "${{ vars.ENABLE_BILLING }}",
+        ENABLE_MANUAL_WEBHOOK_TEST: "${{ vars.ENABLE_MANUAL_WEBHOOK_TEST }}",
       });
     }
   });

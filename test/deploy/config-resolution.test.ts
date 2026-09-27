@@ -224,6 +224,36 @@ describe("PRE-FLIGHT generation", () => {
     }
   });
 
+  it("omits ENABLE_MANUAL_WEBHOOK_TEST when unset or blank and passes it through when set", () => {
+    for (const [label, extra] of [
+      ["unset", {}],
+      ["empty", { ENABLE_MANUAL_WEBHOOK_TEST: "" }],
+      ["whitespace", { ENABLE_MANUAL_WEBHOOK_TEST: " \t " }],
+    ] as const) {
+      const { path } = generate("preflight", releaseEnv(extra), `manual-hook-${label}`);
+      expect(varsOf(path)).not.toHaveProperty("ENABLE_MANUAL_WEBHOOK_TEST");
+    }
+    for (const value of ["true", "1", " yes ", " false ", " custom "]) {
+      const { path } = generate(
+        "preflight",
+        releaseEnv({ ENABLE_MANUAL_WEBHOOK_TEST: value }),
+        `manual-hook-${value.trim()}`,
+      );
+      expect(varsOf(path).ENABLE_MANUAL_WEBHOOK_TEST).toBe(value.trim());
+    }
+  });
+
+  it("keeps ENABLE_MANUAL_WEBHOOK_TEST consistent across deployment modes", () => {
+    for (const mode of ["preflight", "release", "update"]) {
+      const { path } = generate(
+        mode,
+        releaseEnv({ ENABLE_MANUAL_WEBHOOK_TEST: " yes " }),
+        `manual-hook-parity-${mode}`,
+      );
+      expect(varsOf(path).ENABLE_MANUAL_WEBHOOK_TEST).toBe("yes");
+    }
+  });
+
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
     generate(
