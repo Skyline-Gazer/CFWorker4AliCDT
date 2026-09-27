@@ -96,7 +96,13 @@ export async function sendSmtpTestMessage(
         return false;
       const subject = options.subject ?? "CFWorker4AliCDT manual SMTP test";
       const body = options.text ?? "CFWorker4AliCDT manual SMTP test";
-      const safeBody = body.replace(/\r?\n/g, "\r\n.");
+      // RFC 5321: normalize newlines and dot-stuff lines that begin with ".".
+      const safeBody = body
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .split("\n")
+        .map((line) => (line.startsWith(".") ? `.${line}` : line))
+        .join("\r\n");
       await writer.write(
         enc.encode(
           `From: <${options.from}>\r\nTo: <${options.to}>\r\nSubject: ${subject}\r\n\r\n${safeBody}\r\n.\r\n`,
