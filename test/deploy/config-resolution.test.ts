@@ -193,6 +193,37 @@ describe("PRE-FLIGHT generation", () => {
     expect(traffic?.database_id).toBe(FAKE_DATABASE_ID);
   });
 
+  it("omits ENABLE_BILLING when unset or blank and passes through trimmed values", () => {
+    for (const [label, extra] of [
+      ["unset", {}],
+      ["empty", { ENABLE_BILLING: "" }],
+      ["whitespace", { ENABLE_BILLING: " \t " }],
+    ] as const) {
+      const { path } = generate("preflight", releaseEnv(extra), `billing-${label}`);
+      expect(varsOf(path)).not.toHaveProperty("ENABLE_BILLING");
+    }
+
+    for (const value of ["true", "1", " yes ", " false ", " custom "]) {
+      const { path } = generate(
+        "preflight",
+        releaseEnv({ ENABLE_BILLING: value }),
+        `billing-${value.trim()}`,
+      );
+      expect(varsOf(path).ENABLE_BILLING).toBe(value.trim());
+    }
+  });
+
+  it("keeps ENABLE_BILLING consistent across deployment modes", () => {
+    for (const mode of ["preflight", "release", "update"]) {
+      const { path } = generate(
+        mode,
+        releaseEnv({ ENABLE_BILLING: " yes " }),
+        `billing-parity-${mode}`,
+      );
+      expect(varsOf(path).ENABLE_BILLING).toBe("yes");
+    }
+  });
+
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
     generate(

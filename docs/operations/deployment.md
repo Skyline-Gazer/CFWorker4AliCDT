@@ -116,6 +116,7 @@ place a default is stated:
 | `BUSINESS_REGION_ID` | *(absent)* | When unset, no CDT filter is applied. |
 | `SIGNATURE_VERSION` | `v3` | `v2` or `v3`. See §6 if the first run is rejected. |
 | `STOPPED_MODE` | `KeepCharging` | **Read §4 before changing.** |
+| `ENABLE_BILLING` | *(absent)* | Default-off. When set, the resolver passes its trimmed value through; only `1`, `true`, or `yes` (case-insensitive) enables read-only balance lookup. Production enablement requires a separate owner authorization for Alibaba RAM permission `bss:QueryAccountBalance` / BSS API `QueryAccountBalance` on `bssopenapi.aliyuncs.com` (**OWNER GATE**; do not apply IAM as part of this deployment wiring). Monthly spend is unavailable. |
 
 Together these are the SPEC §2.2 **application** variables. Deployment-only values
 (§3c) are a separate set and are never added to this table.
@@ -459,7 +460,7 @@ npx wrangler deploy --config wrangler.preflight.jsonc
 ```
 
 Optional overrides may be exported alongside these (`TRAFFIC_THRESHOLD_GB`,
-`CDT_ENDPOINT`, `BUSINESS_REGION_ID`, `SIGNATURE_VERSION`, `STOPPED_MODE`); unset,
+`CDT_ENDPOINT`, `BUSINESS_REGION_ID`, `SIGNATURE_VERSION`, `STOPPED_MODE`, `ENABLE_BILLING`); unset,
 the committed `wrangler.jsonc` default is preserved.
 
 For the release stage:

@@ -159,6 +159,7 @@ jobs:
           BUSINESS_REGION_ID: ${{ vars.BUSINESS_REGION_ID }}
           SIGNATURE_VERSION: ${{ vars.SIGNATURE_VERSION }}
           STOPPED_MODE: ${{ vars.STOPPED_MODE }}
+          ENABLE_BILLING: ${{ vars.ENABLE_BILLING }}
         run: node scripts/resolve-deploy-config.mjs --mode preflight
 
       # Ordered first, deliberately: the schema must exist before a Worker version

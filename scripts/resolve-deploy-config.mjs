@@ -116,6 +116,7 @@ const OPTIONAL_APPLICATION_VARS = [
   "BUSINESS_REGION_ID",
   "SIGNATURE_VERSION",
   "STOPPED_MODE",
+  "ENABLE_BILLING",
 ];
 
 /**
@@ -213,8 +214,8 @@ function injectApplicationVars(config) {
   }
 
   // Optional overrides: apply when supplied, otherwise preserve the committed
-  // default. `BUSINESS_REGION_ID` has no committed default, so leaving it absent
-  // is the correct outcome rather than writing an empty string.
+  // default. `BUSINESS_REGION_ID` and `ENABLE_BILLING` have no committed default,
+  // so leaving them absent is the correct outcome rather than writing an empty string.
   for (const name of OPTIONAL_APPLICATION_VARS) {
     const value = process.env[name];
     if (present(value)) {

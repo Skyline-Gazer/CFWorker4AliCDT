@@ -67,6 +67,7 @@ generated deployment config is authoritative for `vars`.
 | `BUSINESS_REGION_ID` | No | unset | If set, CDT `BusinessRegionId`. See §5.3. |
 | `SIGNATURE_VERSION` | No | `v3` | `v3` or `v2`. See §4. |
 | `STOPPED_MODE` | No | `KeepCharging` | `StopCharging` or `KeepCharging`. See §6.4. |
+| `ENABLE_BILLING` | No | unset/off | Optional read-only balance lookup; only `1`, `true`, or `yes` (case-insensitive) enables it. Monthly spend is unavailable. Production enablement requires Alibaba RAM permission `bss:QueryAccountBalance` for BSS API `QueryAccountBalance` on `bssopenapi.aliyuncs.com` (**OWNER GATE**). |
 | `ADMIN_USER` | No | `admin` | Dashboard username. See §8. |
 
 ### 2.3 D1 binding
