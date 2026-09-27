@@ -58,6 +58,7 @@ export interface Env {
   readonly ADMIN_USER?: string;
   readonly ADMIN_TOKEN?: string;
   readonly ENABLE_BILLING?: string;
+  readonly ENABLE_MANUAL_WEBHOOK_TEST?: string;
   readonly SMTP_HOST?: string;
   readonly SMTP_PORT?: string;
   readonly SMTP_USER?: string;
@@ -309,6 +310,7 @@ export default {
           signatureVersion: config.signatureVersion,
         });
       },
+      notify: (options, report) => notify(options, report),
     });
 
     // Workers Static Assets is configured for SPA fallback, but Worker-first

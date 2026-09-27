@@ -33,6 +33,7 @@ import { redact } from "../redact";
 import type { HistoryRow } from "../storage/read";
 import type { ConfigResult } from "../config";
 import type { DonorCostInfo } from "../aliyun/api";
+import type { NotifyOptions, NotifyResult, RunReportLike } from "../notify/webhook";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -52,6 +53,8 @@ export interface RouteDeps {
   readonly query: () => Promise<unknown>;
   /** Optional BSS balance read for authenticated donor billing actions. */
   readonly billing?: () => Promise<DonorCostInfo>;
+  /** Manual reporting-only webhook send. No control or storage dependencies. */
+  readonly notify?: (options: NotifyOptions, report: RunReportLike) => Promise<NotifyResult>;
 }
 
 export interface RouteResult {
@@ -214,12 +217,48 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     // validated Worker config, and HTTP never invokes the scheduled sender.
     const parsed = deps.config();
     if (!parsed.ok) return result(500, "Internal Server Error");
-    return jsonResult(501, {
-      success: false,
-      available: false,
+    const config = parsed.config;
+    if (config.webhookUrl === undefined) {
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "WEBHOOK_NOT_CONFIGURED",
+        action: "send_test_webhook",
+      });
+    }
+    if (!config.enableManualWebhookTest) {
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "MANUAL_WEBHOOK_TEST_DISABLED",
+        action: "send_test_webhook",
+      });
+    }
+    if (deps.notify === undefined) return result(500, "Internal Server Error");
+    const outcome = await deps.notify(
+      { webhookUrl: config.webhookUrl, webhookToken: config.webhookToken },
+      {
+        status: "success",
+        trafficGB: undefined,
+        thresholdGB: 0,
+        ecsStatusBefore: undefined,
+        ecsStatusAfter: undefined,
+        desired: undefined,
+        action: undefined,
+        decisionReason: "manual webhook test",
+        stoppedModeRequested: undefined,
+        instanceId: "manual-test",
+        region: "manual-test",
+        time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        durationMs: 0,
+      },
+    );
+    return jsonResult(200, {
+      success: outcome.ok,
+      available: true,
       mutation: false,
-      code:
-        parsed.config.webhookUrl === undefined ? "WEBHOOK_NOT_CONFIGURED" : "BACKEND_NOT_AVAILABLE",
       action: "send_test_webhook",
     });
   }

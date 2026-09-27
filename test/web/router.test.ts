@@ -5,6 +5,8 @@ import type { RouteDeps, RouteResult } from "../../src/web/router";
 import type { AuthConfig } from "../../src/web/auth";
 import type { HistoryRow } from "../../src/storage/read";
 import { loadConfig } from "../../src/config";
+import { notify } from "../../src/notify/webhook";
+import type { NotifyOptions, RunReportLike } from "../../src/notify/webhook";
 
 /**
  * HTTP dispatch (SPEC §8.1).
@@ -552,7 +554,7 @@ describe("route — dispatch with valid credentials", () => {
     });
   });
 
-  it("does not use request webhook credentials and leaves manual sending inactive", async () => {
+  it("requires the manual webhook gate when a Worker URL is configured", async () => {
     const { deps } = harness();
     const req = new Request("https://worker.test/?action=send_test_webhook", {
       method: "POST",
@@ -573,11 +575,83 @@ describe("route — dispatch with valid credentials", () => {
       success: false,
       available: false,
       mutation: false,
-      code: "BACKEND_NOT_AVAILABLE",
+      code: "MANUAL_WEBHOOK_TEST_DISABLED",
       action: "send_test_webhook",
     });
     expect(result.body).not.toContain("body-secret");
     expect(result.body).not.toContain("hooks.example");
+  });
+
+  it("sends a clearly labeled manual test with Worker credentials when gated on", async () => {
+    const calls: unknown[][] = [];
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          WEBHOOK_URL: "https://hooks.example/private?token=url-secret",
+          WEBHOOK_TOKEN: "worker-token",
+          ENABLE_MANUAL_WEBHOOK_TEST: " YeS ",
+        }),
+      notify: async (options: NotifyOptions, report: RunReportLike) => {
+        calls.push([options, report]);
+        return notify(options, report, {
+          fetch: (input, init) => {
+            calls.push([input, init]);
+            return Promise.resolve(new Response(null, { status: 204 }));
+          },
+        });
+      },
+    });
+    const req = new Request("https://worker.test/?action=send_test_webhook", {
+      method: "POST",
+      headers: { authorization: basic("admin", "tok123"), "content-type": "application/json" },
+      body: JSON.stringify({ webhook: { url: "https://attacker.example", token: "body-secret" } }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: true,
+      available: true,
+      mutation: false,
+      action: "send_test_webhook",
+    });
+    expect(calls).toHaveLength(2); // one notify invocation and its mocked fetch call
+    expect(JSON.stringify(calls)).toContain("worker-token");
+    expect(JSON.stringify(calls)).toContain("manual webhook test");
+    expect(JSON.stringify(calls)).not.toContain("body-secret");
+    expect(JSON.stringify(calls)).not.toContain("attacker.example");
+  });
+
+  it("returns honest non-500 status when the manual webhook delivery fails", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          WEBHOOK_URL: "https://hooks.example/hook",
+          ENABLE_MANUAL_WEBHOOK_TEST: "true",
+        }),
+      notify: (options, report) =>
+        notify(options, report, {
+          fetch: () => Promise.reject(new Error("mock transport failure")),
+        }),
+    });
+    const result = await route(
+      request("POST", "/?action=send_test_webhook", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: true,
+      mutation: false,
+      action: "send_test_webhook",
+    });
   });
 
   it("fails closed for send_test_email when SMTP is not configured", async () => {

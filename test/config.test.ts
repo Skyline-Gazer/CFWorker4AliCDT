@@ -84,6 +84,24 @@ describe("loadConfig — ENABLE_BILLING", () => {
   );
 });
 
+describe("loadConfig — ENABLE_MANUAL_WEBHOOK_TEST", () => {
+  it.each(["1", "true", "TRUE", "yes", " YeS "])(
+    "enables manual webhook testing for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_MANUAL_WEBHOOK_TEST: value });
+      expect(result.ok && result.config.enableManualWebhookTest).toBe(true);
+    },
+  );
+
+  it.each([undefined, "", "   ", "0", "false", "on", "no", " true-ish "])(
+    "defaults manual webhook testing off for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_MANUAL_WEBHOOK_TEST: value });
+      expect(result.ok && result.config.enableManualWebhookTest).toBe(false);
+    },
+  );
+});
+
 describe("loadConfig — required bindings (SPEC §2.4)", () => {
   const required = [
     "ALIYUN_ACCESS_KEY_ID",
