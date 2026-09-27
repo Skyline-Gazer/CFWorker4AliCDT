@@ -281,6 +281,7 @@ describe("PRE-FLIGHT cannot enable Cron", () => {
       "BUSINESS_REGION_ID",
       "SIGNATURE_VERSION",
       "STOPPED_MODE",
+      "ENABLE_BILLING",
     ]) {
       expect(resolverStep?.env, name).toHaveProperty(name);
     }
@@ -376,6 +377,7 @@ describe("RELEASE carries the required gates", () => {
         D1_DATABASE_ID: "${{ vars.D1_DATABASE_ID }}",
         REGION_ID: "${{ vars.REGION_ID }}",
         ECS_INSTANCE_ID: "${{ vars.ECS_INSTANCE_ID }}",
+        ENABLE_BILLING: "${{ vars.ENABLE_BILLING }}",
       });
     }
   });
