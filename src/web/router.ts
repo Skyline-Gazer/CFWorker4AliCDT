@@ -35,6 +35,7 @@ import type { ConfigResult } from "../config";
 import type { DonorCostInfo } from "../aliyun/api";
 import type { NotifyOptions, NotifyResult, RunReportLike } from "../notify/webhook";
 import type { TelegramOptions, TelegramResult } from "../notify/telegram";
+import type { SmtpTestOptions } from "../notify/smtp";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -58,6 +59,7 @@ export interface RouteDeps {
   readonly notify?: (options: NotifyOptions, report: RunReportLike) => Promise<NotifyResult>;
   /** Manual Telegram test send. No control or storage dependencies. */
   readonly notifyTelegram?: (options: TelegramOptions) => Promise<TelegramResult>;
+  readonly notifySmtp?: (options: SmtpTestOptions) => Promise<{ ok: boolean }>;
 }
 
 export interface RouteResult {
@@ -151,7 +153,7 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
       return result(405, "Method Not Allowed", { allow: expectedMethod });
     }
     try {
-      return await dispatchDonorAction(action, deps);
+      return await dispatchDonorAction(action, deps, request);
     } catch (cause) {
       console.warn(`[http] donor action failed (${redact(errorMessage(cause))})`);
       return result(500, "Internal Server Error");
@@ -186,7 +188,11 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
   }
 }
 
-async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<RouteResult> {
+async function dispatchDonorAction(
+  action: string,
+  deps: RouteDeps,
+  request: Request,
+): Promise<RouteResult> {
   // Authorization was checked before this function runs. These are UX replies
   // to that check only; no credential is parsed from a request body or returned.
   if (action === "login" || action === "check_login") {
@@ -271,11 +277,53 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     const parsed = deps.config();
     if (!parsed.ok) return result(500, "Internal Server Error");
     const configured = parsed.config.smtpHost !== undefined && parsed.config.smtpFrom !== undefined;
-    return jsonResult(501, {
-      success: false,
-      available: false,
+    if (!configured)
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "SMTP_NOT_CONFIGURED",
+        action: "send_test_email",
+      });
+    if (!parsed.config.enableManualSmtpTest)
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "MANUAL_SMTP_TEST_DISABLED",
+        action: "send_test_email",
+      });
+    if (deps.notifySmtp === undefined) return result(500, "Internal Server Error");
+    let to = parsed.config.smtpFrom;
+    try {
+      const body: unknown = await request.json();
+      const pick = (value: unknown): string | undefined => {
+        if (typeof value === "string" && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value))
+          return value;
+        if (!value || typeof value !== "object") return undefined;
+        const obj = value as Record<string, unknown>;
+        for (const key of ["email", "to"]) {
+          const found = pick(obj[key]);
+          if (found) return found;
+        }
+        return undefined;
+      };
+      to = pick(body) ?? to;
+    } catch {
+      /* missing or invalid JSON uses configured sender address */
+    }
+    const outcome = await deps.notifySmtp({
+      host: parsed.config.smtpHost,
+      port: parsed.config.smtpPort,
+      user: parsed.config.smtpUser,
+      pass: parsed.config.smtpPass,
+      from: parsed.config.smtpFrom,
+      to,
+    });
+    return jsonResult(200, {
+      success: outcome.ok,
+      available: true,
       mutation: false,
-      code: configured ? "BACKEND_NOT_AVAILABLE" : "SMTP_NOT_CONFIGURED",
       action: "send_test_email",
     });
   }

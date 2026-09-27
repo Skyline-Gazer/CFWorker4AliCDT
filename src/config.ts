@@ -46,6 +46,7 @@ export interface RawEnv {
   readonly ENABLE_BILLING?: string | undefined;
   readonly ENABLE_MANUAL_WEBHOOK_TEST?: string | undefined;
   readonly ENABLE_MANUAL_TELEGRAM_TEST?: string | undefined;
+  readonly ENABLE_MANUAL_SMTP_TEST?: string | undefined;
   readonly SMTP_HOST?: string | undefined;
   readonly SMTP_PORT?: string | undefined;
   readonly SMTP_USER?: string | undefined;
@@ -74,6 +75,7 @@ export interface Config {
   readonly enableBilling: boolean;
   readonly enableManualWebhookTest: boolean;
   readonly enableManualTelegramTest: boolean;
+  readonly enableManualSmtpTest: boolean;
   /** Present only when configured; values never returned to HTTP clients. */
   readonly smtpHost: string | undefined;
   readonly smtpPort: string | undefined;
@@ -254,6 +256,9 @@ export function loadConfig(env: RawEnv): ConfigResult {
       enableManualTelegramTest:
         typeof env.ENABLE_MANUAL_TELEGRAM_TEST === "string" &&
         ["1", "true", "yes"].includes(env.ENABLE_MANUAL_TELEGRAM_TEST.trim().toLowerCase()),
+      enableManualSmtpTest:
+        typeof env.ENABLE_MANUAL_SMTP_TEST === "string" &&
+        ["1", "true", "yes"].includes(env.ENABLE_MANUAL_SMTP_TEST.trim().toLowerCase()),
       smtpHost: present(env.SMTP_HOST) ? env.SMTP_HOST.trim() : undefined,
       smtpPort: present(env.SMTP_PORT) ? env.SMTP_PORT.trim() : undefined,
       smtpUser: present(env.SMTP_USER) ? env.SMTP_USER : undefined,

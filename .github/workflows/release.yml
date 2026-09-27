@@ -135,6 +135,7 @@ jobs:
           ENABLE_BILLING: ${{ vars.ENABLE_BILLING }}
           ENABLE_MANUAL_WEBHOOK_TEST: ${{ vars.ENABLE_MANUAL_WEBHOOK_TEST }}
           ENABLE_MANUAL_TELEGRAM_TEST: ${{ vars.ENABLE_MANUAL_TELEGRAM_TEST }}
+          ENABLE_MANUAL_SMTP_TEST: ${{ vars.ENABLE_MANUAL_SMTP_TEST }}
         run: node scripts/resolve-deploy-config.mjs --mode release
 
       # Ordered first, deliberately: the schema must exist before a Worker version

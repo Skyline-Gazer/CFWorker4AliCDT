@@ -284,6 +284,7 @@ describe("PRE-FLIGHT cannot enable Cron", () => {
       "ENABLE_BILLING",
       "ENABLE_MANUAL_WEBHOOK_TEST",
       "ENABLE_MANUAL_TELEGRAM_TEST",
+      "ENABLE_MANUAL_SMTP_TEST",
     ]) {
       expect(resolverStep?.env, name).toHaveProperty(name);
     }
@@ -382,6 +383,7 @@ describe("RELEASE carries the required gates", () => {
         ENABLE_BILLING: "${{ vars.ENABLE_BILLING }}",
         ENABLE_MANUAL_WEBHOOK_TEST: "${{ vars.ENABLE_MANUAL_WEBHOOK_TEST }}",
         ENABLE_MANUAL_TELEGRAM_TEST: "${{ vars.ENABLE_MANUAL_TELEGRAM_TEST }}",
+        ENABLE_MANUAL_SMTP_TEST: "${{ vars.ENABLE_MANUAL_SMTP_TEST }}",
       });
     }
   });

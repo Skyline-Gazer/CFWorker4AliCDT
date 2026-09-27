@@ -120,6 +120,20 @@ describe("loadConfig — ENABLE_MANUAL_TELEGRAM_TEST", () => {
   );
 });
 
+describe("loadConfig — ENABLE_MANUAL_SMTP_TEST", () => {
+  it.each(["1", "true", "TRUE", "yes", " YeS "])("enables manual SMTP testing for %o", (value) => {
+    const result = loadConfig({ ...VALID, ENABLE_MANUAL_SMTP_TEST: value });
+    expect(result.ok && result.config.enableManualSmtpTest).toBe(true);
+  });
+  it.each([undefined, "", " ", "0", "false", "on"])(
+    "defaults manual SMTP testing off for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_MANUAL_SMTP_TEST: value });
+      expect(result.ok && result.config.enableManualSmtpTest).toBe(false);
+    },
+  );
+});
+
 describe("loadConfig — required bindings (SPEC §2.4)", () => {
   const required = [
     "ALIYUN_ACCESS_KEY_ID",

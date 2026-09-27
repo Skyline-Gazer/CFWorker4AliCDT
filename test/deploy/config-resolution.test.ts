@@ -284,6 +284,19 @@ describe("PRE-FLIGHT generation", () => {
     }
   });
 
+  it("omits unset ENABLE_MANUAL_SMTP_TEST and resolves its value across modes", () => {
+    const { path } = generate("preflight", releaseEnv({}), "manual-smtp-unset");
+    expect(varsOf(path)).not.toHaveProperty("ENABLE_MANUAL_SMTP_TEST");
+    for (const mode of ["preflight", "release", "update"]) {
+      const generated = generate(
+        mode,
+        releaseEnv({ ENABLE_MANUAL_SMTP_TEST: " yes " }),
+        `manual-smtp-${mode}`,
+      );
+      expect(varsOf(generated.path).ENABLE_MANUAL_SMTP_TEST).toBe("yes");
+    }
+  });
+
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
     generate(
