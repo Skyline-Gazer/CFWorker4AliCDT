@@ -75,3 +75,28 @@ describe("sendSmtpTestMessage", () => {
     });
   });
 });
+
+it("closes the socket when the timeout fires", async () => {
+  const closed: string[] = [];
+  const hang = {
+    readable: new ReadableStream<Uint8Array>({
+      start() {
+        /* never enqueues; wait until cancel/close */
+      },
+    }),
+    writable: new WritableStream<Uint8Array>(),
+    close() {
+      closed.push("close");
+      return Promise.resolve();
+    },
+    startTls() {
+      return this;
+    },
+  };
+  const result = await sendSmtpTestMessage(base, {
+    connect: () => hang as never,
+    timeoutMs: 20,
+  });
+  expect(result).toEqual({ ok: false });
+  expect(closed).toContain("close");
+});

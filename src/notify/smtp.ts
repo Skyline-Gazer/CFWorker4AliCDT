@@ -32,6 +32,7 @@ export async function sendSmtpTestMessage(
   if (deps === undefined) return { ok: false };
   let socket: Socket | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutState = { fired: false };
   try {
     const operation = async (): Promise<boolean> => {
       socket = deps.connect(
@@ -70,7 +71,8 @@ export async function sendSmtpTestMessage(
       if (Math.floor((await response()) / 100) !== 2 || !(await command("EHLO cfworker4alicdt")))
         return false;
       if (port !== 465) {
-        if (!(await command("STARTTLS"))) return false;
+        // STARTTLS required for non-465; plaintext-only servers fail closed.
+        if (!(await command("STARTTLS", 220))) return false;
         reader.releaseLock();
         writer.releaseLock();
         active = socket.startTls();
@@ -117,12 +119,20 @@ export async function sendSmtpTestMessage(
       operation(),
       new Promise<boolean>((resolve) => {
         timer = setTimeout(() => {
+          timeoutState.fired = true;
+          const open = socket;
+          if (open !== undefined) {
+            void Promise.resolve(open.close()).catch(() => undefined);
+          }
           resolve(false);
         }, ms);
       }),
     ]);
     if (!ok)
-      console.warn("SMTP test failed", { host: options.host, reason: "SMTP exchange failed" });
+      console.warn("SMTP test failed", {
+        host: options.host,
+        reason: timeoutState.fired ? "timeout" : "SMTP exchange failed",
+      });
     try {
       await socket?.close();
     } catch {
@@ -131,7 +141,10 @@ export async function sendSmtpTestMessage(
     return { ok };
   } catch {
     // Transport errors may echo protocol data, so never log their messages.
-    console.warn("SMTP test failed", { host: options.host, reason: "transport error" });
+    console.warn("SMTP test failed", {
+      host: options.host,
+      reason: timeoutState.fired ? "timeout" : "transport error",
+    });
     try {
       await socket?.close();
     } catch {

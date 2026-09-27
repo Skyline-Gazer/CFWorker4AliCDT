@@ -22,8 +22,9 @@ API (`connect`). Cloudflare prohibits outbound TCP to **port 25**. Supported
 paths:
 
 - **465** — implicit TLS (`secureTransport: "on"`)
-- **587** (default) and other non-25 ports — opportunistic TLS (`starttls` +
-  `STARTTLS` + `startTls()`)
+- **587** (default) and other non-25 ports — STARTTLS is **required**
+  (`secureTransport: "starttls"` then `STARTTLS` + `startTls()`). Plaintext
+  servers without STARTTLS are not supported (fail closed with `{ ok: false }`).
 
 Optional `SMTP_USER` / `SMTP_PASS` use SMTP `AUTH LOGIN`. The client is minimal:
 greeting → EHLO → (STARTTLS) → AUTH → MAIL/RCPT/DATA → QUIT. It is not a full
