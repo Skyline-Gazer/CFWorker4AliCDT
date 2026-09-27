@@ -721,7 +721,7 @@ describe("route — dispatch with valid credentials", () => {
     });
   });
 
-  it("fails closed for send_test_telegram when Telegram is configured but transport is inactive", async () => {
+  it("fails closed for send_test_telegram when Telegram is configured but gate is off", async () => {
     const { deps } = harness({
       config: () =>
         loadConfig({
@@ -732,6 +732,7 @@ describe("route — dispatch with valid credentials", () => {
           ECS_INSTANCE_ID: "i-0123456789abcdef0",
           TELEGRAM_BOT_TOKEN: "private-bot-token",
           TELEGRAM_CHAT_ID: "-1009988776655",
+          ENABLE_MANUAL_TELEGRAM_TEST: "false",
         }),
     });
     const req = new Request("https://worker.test/?action=send_test_telegram", {
@@ -748,11 +749,82 @@ describe("route — dispatch with valid credentials", () => {
       success: false,
       available: false,
       mutation: false,
-      code: "BACKEND_NOT_AVAILABLE",
+      code: "MANUAL_TELEGRAM_TEST_DISABLED",
       action: "send_test_telegram",
     });
     expect(result.body).not.toContain("private-bot-token");
     expect(result.body).not.toContain("body-bot-token");
+  });
+
+  it("sends a labeled Telegram manual test using Worker credentials and ignores body credentials", async () => {
+    const calls: unknown[] = [];
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          TELEGRAM_BOT_TOKEN: "worker-private-token",
+          TELEGRAM_CHAT_ID: "-1009988776655",
+          TELEGRAM_PROXY_URL: "https://telegram-proxy.example/api",
+          ENABLE_MANUAL_TELEGRAM_TEST: " YeS ",
+        }),
+      notifyTelegram: (options) => {
+        calls.push(options);
+        return Promise.resolve({ ok: true });
+      },
+    });
+    const req = new Request("https://worker.test/?action=send_test_telegram", {
+      method: "POST",
+      headers: { authorization: basic("admin", "tok123"), "content-type": "application/json" },
+      body: JSON.stringify({ telegram: { bot_token: "body-bot-token", chat_id: "999" } }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: true,
+      available: true,
+      mutation: false,
+      action: "send_test_telegram",
+    });
+    expect(calls).toEqual([
+      {
+        botToken: "worker-private-token",
+        chatId: "-1009988776655",
+        telegramProxyUrl: "https://telegram-proxy.example/api",
+      },
+    ]);
+    expect(result.body).not.toContain("worker-private-token");
+    expect(result.body).not.toContain("body-bot-token");
+  });
+
+  it("returns HTTP 200 when the enabled Telegram notifier reports transport failure", async () => {
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          TELEGRAM_BOT_TOKEN: "private-token",
+          TELEGRAM_CHAT_ID: "-1009988776655",
+          ENABLE_MANUAL_TELEGRAM_TEST: "1",
+        }),
+      notifyTelegram: () => Promise.resolve({ ok: false }),
+    });
+    const result = await route(
+      request("POST", "/?action=send_test_telegram", basic("admin", "tok123")),
+      deps,
+    );
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: true,
+      mutation: false,
+      action: "send_test_telegram",
+    });
+    expect(result.body).not.toContain("private-token");
   });
 
   it("keeps authentication as the gate for donor login and never echoes credentials", async () => {
