@@ -7,7 +7,7 @@ an owner review packet only. It authorizes **no production deployment**.
 
 ```text
 PROGRAM_STATUS=UPDATE_PATH_MERGED_AWAITING_OWNER_AUTHORIZATION
-CURRENT_MAIN_SHA=fc71143414e0f567acfb3845d0c82cd48c1b2659
+CURRENT_MAIN_SHA=433cb5ea7017f120584572d5a9e7124a25d5f75e
 LAST_PRODUCTION_DEPLOYED_SHA=471dda0758ea21ec9b6e2f30a33c815ec70100fd
 ISSUE=Refs #115 #116
 PRODUCTION_DEPLOYED=NO
@@ -22,6 +22,7 @@ PR_CI=SUCCESS (Format, lint, typecheck, test)
 MERGE_COMMIT=fc71143414e0f567acfb3845d0c82cd48c1b2659
 MAIN_CI=SUCCESS https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36315698833
 LOCAL_VALIDATE=PASS (npm run validate; 853 tests on the ENABLE_BILLING wiring branch before merge)
+DOCS_ONLY_AFTER_WIRING=PR #118 production UPDATE packet + PR #119 owner-gates #90–#93 (no Worker code change after fc71143)
 ```
 
 ## Production diff summary (FEATURE + wiring + docs since `471dda07`)
@@ -38,6 +39,8 @@ Commits on current `main` after last deployed production SHA `471dda07`:
 | `9dd1e07` (#113) | FEATURE — fail-closed Telegram test send + `telegram_configured` flag |
 | `928e965` (#114) | docs — FEATURE-11 donor parity audit |
 | `82ecde0` / `fc71143` (#117) | OPS — wire optional `ENABLE_BILLING` through deploy resolver + workflows; reconcile capability matrix (Refs #115 #116) |
+| `b6b0923` (#118) | docs — production UPDATE packet refresh |
+| `433cb5e` (#119) | docs — owner gates #90–#93 decision packet (no activation) |
 
 ### Capability honesty (not “fully operational”)
 
