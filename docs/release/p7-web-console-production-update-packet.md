@@ -1,98 +1,96 @@
 # OWNER REVIEW — PRODUCTION UPDATE PACKET
 
 **Scope:** Existing-Worker UPDATE path for Skyline-Gazer/CFWorker4AliCDT. This is
-an owner review packet only. Decision C authorizes **no production deployment**.
+an owner review packet only. It authorizes **no production deployment**.
 
 ## Program and revision
 
 ```text
 PROGRAM_STATUS=UPDATE_PATH_MERGED_AWAITING_OWNER_AUTHORIZATION
-CURRENT_MAIN_SHA=8d0d95673e78dfa7766d84fea2de2b71a3ac9ab6
-LAST_PRODUCTION_RELEASE_SHA=106f4d214a883ac9bfdf0798110f845092fbe971
-ISSUE=Refs #105
+CURRENT_MAIN_SHA=fc71143414e0f567acfb3845d0c82cd48c1b2659
+LAST_PRODUCTION_DEPLOYED_SHA=471dda0758ea21ec9b6e2f30a33c815ec70100fd
+ISSUE=Refs #115 #116
+PRODUCTION_DEPLOYED=NO
+NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE
 ```
 
-## Audit summary
-
-Commits on current `main` after production RELEASE `106f4d21`:
-
-- `c9edaa1` recorded the measured Workers Free Cron CPU result.
-- `0fd6b21` (Refs #100) added donor provenance and API compatibility documentation.
-- `b25941f` (Refs #101) added the static donor UI and the `ASSETS` binding/configuration.
-- `dbbf226` (Refs #102) added authenticated status, refresh, and history adapters; the
-  donor control action remains a non-mutating placeholder.
-- `f3c6522` (Refs #103) added decision-reason auditability and
-  `0002_decision_reason.sql`. The migration adds a nullable column without backfill.
-- `ad671bc` (Refs #104) refreshed the Milestone-1 release packet's main SHA.
-
-The code changes since the last production release add the dashboard/static assets,
-read-only donor surfaces, and additive decision-reason reporting. The control path
-only carries the decision reason for auditability; **ECS mutation semantics and the
-Cron-only ECS mutation authority do not change**. The current main tip remains held
-and has not been deployed.
-
-## Local validation evidence
+## CI result
 
 ```text
-LOCAL_VALIDATE=PASS
-COMMAND=npm run validate
-EVIDENCE=Format, lint, typecheck, test (801 passed / 24 files), deploy:dry-run PASS; CI green on PR #106; merged to main as 8d0d956 (Asia/Shanghai 2026-09-26)
-UPDATE_SMOKE=resolver --mode update emits triggers.crons=["*/10 * * * *"], secrets.required retained, custom_domain cdt.q9m3.com; --mode preflight still emits []
+PR=#117
+PR_CI=SUCCESS (Format, lint, typecheck, test)
+MERGE_COMMIT=fc71143414e0f567acfb3845d0c82cd48c1b2659
+MAIN_CI=SUCCESS https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36315698833
+LOCAL_VALIDATE=PASS (npm run validate; 853 tests on the ENABLE_BILLING wiring branch before merge)
 ```
 
-## UPDATE path
+## Production diff summary (FEATURE + wiring + docs since `471dda07`)
 
-- Resolver: `scripts/resolve-deploy-config.mjs --mode update` writes the ignored
-  root-level `wrangler.update.jsonc` artifact.
-- Workflow: `.github/workflows/update.yml`, workflow-dispatch only, protected
-  `production` Environment, main-ref guard, and a separate non-cancelling
-  `deploy-update` concurrency group.
-- Required inputs, with no defaults: `confirmation=UPDATE`,
-  `EXISTING_WORKER_CONFIRMED=YES`, and an explicit
-  `HTTP_EXPOSURE_MODE=workers_dev|custom_domain`.
-- The existing-Worker attestation confirms that the Worker exists and its Cron is
-  already live. UPDATE does not require `LIVE_READ_ONLY_VERIFIED`, which is the
-  first-deployment RELEASE gate.
-- The generated config carries Cron `*/10 * * * *`, keeps the selected HTTP
-  exposure (`cdt.q9m3.com` when the owner selects the current custom-domain mode),
-  disables temporary preview URLs, and retains committed `secrets.required`.
-- Workflow order: validate and check required inputs → resolve UPDATE config →
-  apply remote D1 migrations → deploy with that config → verify required Worker
-  Secret names. No secret values are printed.
-- After update, verify Cron remains present, review the migration result, and check
-  the console and health endpoint.
+Commits on current `main` after last deployed production SHA `471dda07`:
 
-PRE-FLIGHT is only for creating a new Worker. Its `triggers.crons = []` removes all
-Cron Triggers; do not use PRE-FLIGHT against the live Cron service.
+| SHA | Summary |
+| --- | --- |
+| `5a7758c` (#108) | FEATURE — adapt donor `get_config` safe non-secret fields |
+| `22c64a1` (#109) | FEATURE — adapt donor `get_logs` from bounded D1 history |
+| `f2d76f6` (#110) | FEATURE — read-only BSS billing enrichment behind `ENABLE_BILLING` (default-off) |
+| `88488ce` (#111) | FEATURE — webhook metadata + fail-closed `send_test_webhook` |
+| `e535724` (#112) | FEATURE — fail-closed SMTP test send + `smtp_configured` flag |
+| `9dd1e07` (#113) | FEATURE — fail-closed Telegram test send + `telegram_configured` flag |
+| `928e965` (#114) | docs — FEATURE-11 donor parity audit |
+| `82ecde0` / `fc71143` (#117) | OPS — wire optional `ENABLE_BILLING` through deploy resolver + workflows; reconcile capability matrix (Refs #115 #116) |
 
-## Migration plan — `0002_decision_reason.sql`
+### Capability honesty (not “fully operational”)
 
-`0002_decision_reason.sql` runs:
+- `get_config` — **ADAPTER** (safe read). `save_config` — **PLACEHOLDER** / not operational.
+- SMTP / Telegram / webhook **test sends** — **PLACEHOLDER** fail-closed; transports not activated. Cron scheduled webhook sender unchanged.
+- `get_billing` — fail-closed when `ENABLE_BILLING` off; **ADAPTER** balance-only when on **and** BSS IAM present. **Monthly billing NOT AVAILABLE**.
+- `control_instance` remains **PLACEHOLDER**; Cron (`*/10 * * * *`) is the sole ECS mutation authority.
 
-```sql
-ALTER TABLE traffic_checks ADD COLUMN decision_reason TEXT;
+### New / changed variables
+
+| Variable | Required? | Default | Notes |
+| --- | --- | --- | --- |
+| `ENABLE_BILLING` | No | unset / omitted (default-off) | Optional GitHub Variable / Worker var. Resolver omits when unset/empty; injects trimmed value when set. Runtime enables only for `1`/`true`/`yes` (case-insensitive). **Do not set true in production without separate owner auth.** |
+| BSS IAM `QueryAccountBalance` (`bssopenapi.aliyuncs.com`) | — | **NOT applied** | OWNER GATE. This packet does **not** grant Alibaba RAM/BSS permission. Enabling billing in production requires both the variable **and** separate IAM authorization. |
+
+No change to required secrets (`ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ADMIN_TOKEN`).
+
+## D1 migrations
+
+```text
+MIGRATIONS_ON_MAIN=0001_traffic_checks.sql, 0002_decision_reason.sql
+NEWER_THAN_0002=NONE
+0002_ALREADY_APPLIED_IN_PRODUCTION=YES (per prior UPDATE path; additive nullable decision_reason)
+EXPECTED_REMOTE_MIGRATION_WORK_THIS_UPDATE=none beyond re-apply no-op if already applied
 ```
 
-This is additive and nullable, with no default and no backfill; existing rows stay
-`NULL`. Apply the remote migration **before** deploying Worker code that writes
-`decision_reason`. The UPDATE workflow orders `wrangler d1 migrations apply` before
-`wrangler deploy` and passes `wrangler.update.jsonc` to both commands. No remote D1
-migration has been run for this packet.
-
-## Expected Cron
+## Expected Cron / domain / Secret state (unchanged)
 
 ```text
 EXPECTED_CRON_AFTER_UPDATE=*/10 * * * *
+EXPECTED_DOMAIN=cdt.q9m3.com (custom_domain exposure; owner confirms current mode)
+EXPECTED_SECRETS_REQUIRED=ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET, ADMIN_TOKEN
+SECRETS_VALUES=unchanged (workflow verifies names only; never prints values)
 ```
 
-## Rollback
+## UPDATE path (owner-operated only)
 
-If an update regresses, prepare a reviewed `main` commit that restores the last
-known-good application code from `LAST_PRODUCTION_RELEASE_SHA` while retaining the
-UPDATE workflow/resolver and the already-applied additive migration. Then use the
-UPDATE workflow with the same explicit Cron and HTTP exposure confirmations. The
-nullable column is backward-compatible and remains applied. Never use PRE-FLIGHT
-for rollback; its empty Cron array removes the live schedule.
+- Resolver: `scripts/resolve-deploy-config.mjs --mode update` → ignored `wrangler.update.jsonc`.
+- Workflow: `.github/workflows/update.yml` (workflow_dispatch only, protected `production` Environment).
+- Required inputs (no defaults): `confirmation=UPDATE`, `EXISTING_WORKER_CONFIRMED=YES`, explicit `HTTP_EXPOSURE_MODE=custom_domain` (or `workers_dev` if that is the live mode).
+- Order: validate → resolve UPDATE config → `wrangler d1 migrations apply` → `wrangler deploy` → assert required Worker Secret **names**.
+- **Rollback via UPDATE only** (restore known-good application code on `main`, then UPDATE). **Never PRE-FLIGHT** against the live Cron service — PRE-FLIGHT emits `triggers.crons = []` and would remove the schedule.
+
+## Post-update acceptance checks (after future owner auth)
+
+1. Worker version matches `CURRENT_MAIN_SHA` (or the owner-authorized tip).
+2. Cron still `*/10 * * * *`; domain still `cdt.q9m3.com` (if custom_domain).
+3. `GET /health` liveness OK; authenticated dashboard loads.
+4. `get_config` returns allowlisted non-secret fields only.
+5. `control_instance` still HTTP 501 / non-mutating.
+6. Notification test actions still fail-closed (no transport activation).
+7. `ENABLE_BILLING` remains unset/false unless a **separate** owner decision sets the variable **and** authorizes BSS IAM.
+8. No secret values appear in workflow logs.
 
 ## Production action state
 
@@ -101,7 +99,9 @@ PRODUCTION_DEPLOYED=NO
 PRE_FLIGHT_DISPATCHED=NO
 RELEASE_DISPATCHED=NO
 UPDATE_DISPATCHED=NO
+ENABLE_BILLING_IN_PRODUCTION=unset/off (expected)
+BSS_IAM_APPLIED=NO
 NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE
 ```
 
-No production Cron, domain, D1 database, or ECS resource was contacted or changed.
+No production Cron, domain, D1 database, Worker secret value, or ECS resource was contacted or changed by preparing this packet.
