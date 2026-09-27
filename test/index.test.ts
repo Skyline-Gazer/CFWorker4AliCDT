@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("cloudflare:sockets", () => ({ connect: vi.fn() }));
+
 import worker from "../src/index";
 import type { Env } from "../src/index";
 

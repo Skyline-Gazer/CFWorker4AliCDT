@@ -33,6 +33,8 @@ import { runPipeline } from "./monitor/execute";
 import type { RunReport } from "./monitor/execute";
 import { notify } from "./notify/webhook";
 import { sendTelegramMessage } from "./notify/telegram";
+import { sendSmtpTestMessage } from "./notify/smtp";
+import { connect } from "cloudflare:sockets";
 import { recordRun } from "./storage/history";
 import { readHistory, clampLimit } from "./storage/read";
 import type { HistoryRow } from "./storage/read";
@@ -61,6 +63,7 @@ export interface Env {
   readonly ENABLE_BILLING?: string;
   readonly ENABLE_MANUAL_WEBHOOK_TEST?: string;
   readonly ENABLE_MANUAL_TELEGRAM_TEST?: string;
+  readonly ENABLE_MANUAL_SMTP_TEST?: string;
   readonly SMTP_HOST?: string;
   readonly SMTP_PORT?: string;
   readonly SMTP_USER?: string;
@@ -314,6 +317,7 @@ export default {
       },
       notify: (options, report) => notify(options, report),
       notifyTelegram: (options) => sendTelegramMessage(options),
+      notifySmtp: (options) => sendSmtpTestMessage(options, { connect }),
     });
 
     // Workers Static Assets is configured for SPA fallback, but Worker-first

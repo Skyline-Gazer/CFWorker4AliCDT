@@ -670,7 +670,7 @@ describe("route — dispatch with valid credentials", () => {
     });
   });
 
-  it("fails closed for send_test_email when SMTP is configured but transport is inactive", async () => {
+  it("fails closed for send_test_email when SMTP is configured but gate is off", async () => {
     const { deps } = harness({
       config: () =>
         loadConfig({
@@ -698,11 +698,57 @@ describe("route — dispatch with valid credentials", () => {
       success: false,
       available: false,
       mutation: false,
-      code: "BACKEND_NOT_AVAILABLE",
+      code: "MANUAL_SMTP_TEST_DISABLED",
       action: "send_test_email",
     });
     expect(result.body).not.toContain("private-smtp-pass");
     expect(result.body).not.toContain("body-smtp-pass");
+  });
+
+  it("sends SMTP test with Worker credentials and validated optional recipient", async () => {
+    const calls: unknown[] = [];
+    const { deps } = harness({
+      config: () =>
+        loadConfig({
+          ALIYUN_ACCESS_KEY_ID: "id",
+          ALIYUN_ACCESS_KEY_SECRET: "secret",
+          REGION_ID: "cn-hongkong",
+          ECS_INSTANCE_ID: "i-0123456789abcdef0",
+          SMTP_HOST: "smtp.example.com",
+          SMTP_FROM: "sender@example.com",
+          SMTP_USER: "worker-user",
+          SMTP_PASS: "worker-pass",
+          ENABLE_MANUAL_SMTP_TEST: " YeS ",
+        }),
+      notifySmtp: (opts) => {
+        calls.push(opts);
+        return Promise.resolve({ ok: false });
+      },
+    });
+    const req = new Request("https://worker.test/?action=send_test_email", {
+      method: "POST",
+      headers: { authorization: basic("admin", "tok123"), "content-type": "application/json" },
+      body: JSON.stringify({ email: "recipient@example.com", password: "body-secret" }),
+    });
+    const result = await route(req, deps);
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({
+      success: false,
+      available: true,
+      mutation: false,
+      action: "send_test_email",
+    });
+    expect(calls).toEqual([
+      {
+        host: "smtp.example.com",
+        port: undefined,
+        user: "worker-user",
+        pass: "worker-pass",
+        from: "sender@example.com",
+        to: "recipient@example.com",
+      },
+    ]);
+    expect(result.body).not.toContain("body-secret");
   });
 
   it("fails closed for send_test_telegram when Telegram is not configured", async () => {
