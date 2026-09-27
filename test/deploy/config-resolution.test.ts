@@ -254,6 +254,36 @@ describe("PRE-FLIGHT generation", () => {
     }
   });
 
+  it("omits ENABLE_MANUAL_TELEGRAM_TEST when unset or blank and passes it through when set", () => {
+    for (const [label, extra] of [
+      ["unset", {}],
+      ["empty", { ENABLE_MANUAL_TELEGRAM_TEST: "" }],
+      ["whitespace", { ENABLE_MANUAL_TELEGRAM_TEST: " \t " }],
+    ] as const) {
+      const { path } = generate("preflight", releaseEnv(extra), `manual-telegram-${label}`);
+      expect(varsOf(path)).not.toHaveProperty("ENABLE_MANUAL_TELEGRAM_TEST");
+    }
+    for (const value of ["true", "1", " yes ", " false ", " custom "]) {
+      const { path } = generate(
+        "preflight",
+        releaseEnv({ ENABLE_MANUAL_TELEGRAM_TEST: value }),
+        `manual-telegram-${value.trim()}`,
+      );
+      expect(varsOf(path).ENABLE_MANUAL_TELEGRAM_TEST).toBe(value.trim());
+    }
+  });
+
+  it("keeps ENABLE_MANUAL_TELEGRAM_TEST consistent across deployment modes", () => {
+    for (const mode of ["preflight", "release", "update"]) {
+      const { path } = generate(
+        mode,
+        releaseEnv({ ENABLE_MANUAL_TELEGRAM_TEST: " yes " }),
+        `manual-telegram-parity-${mode}`,
+      );
+      expect(varsOf(path).ENABLE_MANUAL_TELEGRAM_TEST).toBe("yes");
+    }
+  });
+
   it("leaves the committed wrangler.jsonc byte-identical", () => {
     const before = readFileSync(SOURCE_CONFIG, "utf8");
     generate(

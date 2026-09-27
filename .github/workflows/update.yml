@@ -128,6 +128,7 @@ jobs:
           STOPPED_MODE: ${{ vars.STOPPED_MODE }}
           ENABLE_BILLING: ${{ vars.ENABLE_BILLING }}
           ENABLE_MANUAL_WEBHOOK_TEST: ${{ vars.ENABLE_MANUAL_WEBHOOK_TEST }}
+          ENABLE_MANUAL_TELEGRAM_TEST: ${{ vars.ENABLE_MANUAL_TELEGRAM_TEST }}
         run: node scripts/resolve-deploy-config.mjs --mode update
 
       # Additive migrations must be applied before code that reads or writes the

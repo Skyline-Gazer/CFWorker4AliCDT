@@ -34,6 +34,7 @@ import type { HistoryRow } from "../storage/read";
 import type { ConfigResult } from "../config";
 import type { DonorCostInfo } from "../aliyun/api";
 import type { NotifyOptions, NotifyResult, RunReportLike } from "../notify/webhook";
+import type { TelegramOptions, TelegramResult } from "../notify/telegram";
 
 /** What a handler returns: a body plus any headers to add. */
 export interface HandlerOutput {
@@ -55,6 +56,8 @@ export interface RouteDeps {
   readonly billing?: () => Promise<DonorCostInfo>;
   /** Manual reporting-only webhook send. No control or storage dependencies. */
   readonly notify?: (options: NotifyOptions, report: RunReportLike) => Promise<NotifyResult>;
+  /** Manual Telegram test send. No control or storage dependencies. */
+  readonly notifyTelegram?: (options: TelegramOptions) => Promise<TelegramResult>;
 }
 
 export interface RouteResult {
@@ -283,11 +286,32 @@ async function dispatchDonorAction(action: string, deps: RouteDeps): Promise<Rou
     if (!parsed.ok) return result(500, "Internal Server Error");
     const configured =
       parsed.config.telegramBotToken !== undefined && parsed.config.telegramChatId !== undefined;
-    return jsonResult(501, {
-      success: false,
-      available: false,
+    if (!configured)
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "TELEGRAM_NOT_CONFIGURED",
+        action: "send_test_telegram",
+      });
+    if (!parsed.config.enableManualTelegramTest)
+      return jsonResult(501, {
+        success: false,
+        available: false,
+        mutation: false,
+        code: "MANUAL_TELEGRAM_TEST_DISABLED",
+        action: "send_test_telegram",
+      });
+    if (deps.notifyTelegram === undefined) return result(500, "Internal Server Error");
+    const outcome = await deps.notifyTelegram({
+      botToken: parsed.config.telegramBotToken,
+      chatId: parsed.config.telegramChatId,
+      telegramProxyUrl: parsed.config.telegramProxyUrl,
+    });
+    return jsonResult(200, {
+      success: outcome.ok,
+      available: true,
       mutation: false,
-      code: configured ? "BACKEND_NOT_AVAILABLE" : "TELEGRAM_NOT_CONFIGURED",
       action: "send_test_telegram",
     });
   }

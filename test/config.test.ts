@@ -102,6 +102,24 @@ describe("loadConfig — ENABLE_MANUAL_WEBHOOK_TEST", () => {
   );
 });
 
+describe("loadConfig — ENABLE_MANUAL_TELEGRAM_TEST", () => {
+  it.each(["1", "true", "TRUE", "yes", " YeS "])(
+    "enables manual Telegram testing for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_MANUAL_TELEGRAM_TEST: value });
+      expect(result.ok && result.config.enableManualTelegramTest).toBe(true);
+    },
+  );
+
+  it.each([undefined, "", "   ", "0", "false", "on", "no", " true-ish "])(
+    "defaults manual Telegram testing off for %o",
+    (value) => {
+      const result = loadConfig({ ...VALID, ENABLE_MANUAL_TELEGRAM_TEST: value });
+      expect(result.ok && result.config.enableManualTelegramTest).toBe(false);
+    },
+  );
+});
+
 describe("loadConfig — required bindings (SPEC §2.4)", () => {
   const required = [
     "ALIYUN_ACCESS_KEY_ID",
