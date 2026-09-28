@@ -6,8 +6,8 @@ approved and their donor-facing UX/contracts are implemented. This document
 UPDATE/RELEASE/PRE-FLIGHT dispatch.
 
 Parent tracking: Epic **#77**, follow-up **#116**. Related production UPDATE
-packet: `docs/release/p7-web-console-production-update-packet.md` (tip
-`19cea6a…`).
+packet: `docs/release/p7-web-console-production-update-packet.md` (live tip
+`38a3e09`).
 
 ---
 
@@ -71,7 +71,7 @@ PRE-FLIGHT, RELEASE, UPDATE, IAM expansion, or billing activation is implied.
 
 | Artifact | Path / Issue |
 | --- | --- |
-| Production UPDATE packet (tip `19cea6a`) | `docs/release/p7-web-console-production-update-packet.md` |
+| Production UPDATE packet (live tip `38a3e09`) | `docs/release/p7-web-console-production-update-packet.md` |
 | Owner gates #90–#93 | `docs/release/p7-owner-gates-90-93.md` |
 | Donor capability matrix | `docs/planning/p7-donor-api-compatibility.md` |
 | Worker SMTP architecture | `docs/architecture/worker-smtp.md` |
