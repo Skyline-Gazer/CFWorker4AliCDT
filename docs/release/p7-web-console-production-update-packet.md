@@ -7,12 +7,12 @@ an owner review packet only. It authorizes **no production deployment**.
 
 ```text
 PROGRAM_STATUS=UPDATE_PATH_MERGED_AWAITING_OWNER_AUTHORIZATION
-CURRENT_MAIN_SHA=51c5d3c9d00ccae643c4e87a8779740735c4b8bb
-RECOMMENDED_UPDATE_SHA=51c5d3c9d00ccae643c4e87a8779740735c4b8bb
+CURRENT_MAIN_SHA=5bc2ebebe6c12cb1cbc752c14422812561ff040d
+RECOMMENDED_UPDATE_SHA=5bc2ebebe6c12cb1cbc752c14422812561ff040d
 LAST_PRODUCTION_DEPLOYED_SHA=76f093f38acc94d609eccddcdb1c6db77f290109
 ISSUE=Refs #116 #77 #128 #129
 PRODUCTION_DEPLOYED=NO
-NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE (tip 51c5d3c) + separate ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
+NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE (tip 5bc2ebe) + separate ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
 ```
 
 ## CI result
@@ -21,7 +21,7 @@ NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE (tip 51c5d3c) + separa
 TIP_MERGE_COMMITS=#123 dcda7b0 (webhook), #125 5cfd1b6 (Telegram), #127 19cea6a (SMTP), #131 a9d25e0 (save_config UX), #132 51c5d3c (monthly billing UX)
 TIP_CI=SUCCESS on each feature PR (Format, lint, typecheck, test); docs PRs as applicable
 LOCAL_VALIDATE=PASS (Node 22; 912 tests on #129 tip before merge)
-PRODUCTION_DEPLOYED_FOR_TIP_51c5d3c=NO
+PRODUCTION_DEPLOYED_FOR_TIP_5bc2ebe=NO
 UPDATE_DISPATCHED=NO
 ```
 
@@ -37,6 +37,7 @@ Commits on current `main` after last deployed production SHA `76f093f`:
 | `720dc77` (#130) | DOCS — prior UPDATE packet refresh for tip `19cea6a` |
 | `a9d25e0` (#131 / #128) | FEATURE/UX — `save_config` Option C clearer unavailable UX (still HTTP 501 `BACKEND_NOT_AVAILABLE`; no persistence) |
 | `51c5d3c` (#132 / #129) | FEATURE/UX — monthly billing Option C: `monthly_available: false`; balance-only donor UI; no new IAM |
+| `5bc2ebe` (#133) | DOCS — UPDATE packet refresh for tip including #128/#129 Option C |
 
 Application paths changed vs `76f093f` (excluding pure docs/tests): `scripts/resolve-deploy-config.mjs`, `src/aliyun/api.ts`, `src/config.ts`, `src/index.ts`, `src/notify/smtp.ts`, `src/notify/telegram.ts`, `src/web/donor-actions.ts`, `src/web/router.ts`, `static/index.html`, plus workflow var passthrough for the three `ENABLE_MANUAL_*` gates.
 
@@ -91,11 +92,11 @@ SECRETS_VALUES=unchanged (workflow verifies names only; never prints values)
 - Required inputs (no defaults): `confirmation=UPDATE`, `EXISTING_WORKER_CONFIRMED=YES`, explicit `HTTP_EXPOSURE_MODE=custom_domain` (or `workers_dev` if that is the live mode).
 - Order: validate → resolve UPDATE config → `wrangler d1 migrations apply` → `wrangler deploy` → assert required Worker Secret **names**.
 - **Rollback via UPDATE only** (restore known-good application code on `main`, then UPDATE). **Never PRE-FLIGHT** against the live Cron service — PRE-FLIGHT emits `triggers.crons = []` and would remove the schedule.
-- **Do not dispatch UPDATE for tip `51c5d3c` until owner authorization.** This packet alone is not authorization.
+- **Do not dispatch UPDATE for tip `5bc2ebe` until owner authorization.** This packet alone is not authorization.
 
 ## Post-update acceptance checks (after future owner auth)
 
-1. Worker version matches `CURRENT_MAIN_SHA` / `RECOMMENDED_UPDATE_SHA` (`51c5d3c…`) or the owner-authorized tip.
+1. Worker version matches `CURRENT_MAIN_SHA` / `RECOMMENDED_UPDATE_SHA` (`5bc2ebe…`) or the owner-authorized tip.
 2. Cron still `*/10 * * * *`; domain still `cdt.q9m3.com` (if custom_domain).
 3. `GET /health` liveness OK; authenticated dashboard loads.
 4. `get_config` returns allowlisted non-secret fields only.
@@ -128,7 +129,7 @@ ENABLE_MANUAL_TELEGRAM_TEST_IN_PRODUCTION=unset/off (confirmed — not present)
 ENABLE_MANUAL_SMTP_TEST_IN_PRODUCTION=unset/off (confirmed — not present)
 BSS_IAM_APPLIED=NO
 GATES_90_93_ACTIVE=NO
-NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE of 51c5d3c (optional) + ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
+NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE of 5bc2ebe (optional) + ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
 ```
 
 No production Cron, domain, D1 database, Worker secret value, GitHub variable, or ECS resource was contacted or changed by preparing this packet.
