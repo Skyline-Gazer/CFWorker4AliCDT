@@ -305,7 +305,14 @@ export default {
       billing: async () => {
         const parsed = loadConfig(env);
         if (!parsed.ok) {
-          return { enabled: false, monthly_cost: null, balance: null, currency: null, error: null };
+          return {
+            enabled: false,
+            monthly_available: false,
+            monthly_cost: null,
+            balance: null,
+            currency: null,
+            error: null,
+          };
         }
         const config = parsed.config;
         return queryBssBilling({

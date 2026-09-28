@@ -322,6 +322,7 @@ describe("queryBssBilling", () => {
     const result = await queryBssBilling({ ...CONTEXT, enabled: false, fetch });
     expect(result).toEqual({
       enabled: false,
+      monthly_available: false,
       monthly_cost: null,
       balance: null,
       currency: null,
@@ -341,6 +342,7 @@ describe("queryBssBilling", () => {
     const result = await queryBssBilling({ ...CONTEXT, enabled: true, fetch });
     expect(result).toEqual({
       enabled: true,
+      monthly_available: false,
       monthly_cost: null,
       balance: 123.45,
       currency: "USD",
@@ -355,6 +357,7 @@ describe("queryBssBilling", () => {
     const rejected = stubFetch([json({ Code: "NoPermission", Message: "sensitive" }, 403)]);
     expect(await queryBssBilling({ ...CONTEXT, enabled: true, fetch: rejected.fetch })).toEqual({
       enabled: true,
+      monthly_available: false,
       monthly_cost: null,
       balance: null,
       currency: null,
@@ -364,6 +367,7 @@ describe("queryBssBilling", () => {
     const malformed = stubFetch([json({ Code: "200", Success: true, Data: {} })]);
     expect(await queryBssBilling({ ...CONTEXT, enabled: true, fetch: malformed.fetch })).toEqual({
       enabled: true,
+      monthly_available: false,
       monthly_cost: null,
       balance: null,
       currency: null,

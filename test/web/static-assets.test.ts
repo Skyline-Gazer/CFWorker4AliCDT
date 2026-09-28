@@ -66,6 +66,14 @@ describe("donor static asset import", () => {
     expect(html).not.toMatch(/\?action=save_config/);
   });
 
+  it("labels billing as account balance and explains monthly spend is unavailable", () => {
+    const html = readFileSync(asset("index.html"), "utf8");
+    expect(html).toContain("账户余额");
+    expect(html).toContain("本月费用不可用");
+    expect(html).not.toContain("item.cost.monthly_cost");
+    expect(html).not.toContain("本月费用</span>和");
+  });
+
   it("contains a PNG icon asset", () => {
     const icon = readFileSync(asset("icon.png"));
     expect([...icon.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
