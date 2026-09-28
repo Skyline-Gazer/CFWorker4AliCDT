@@ -403,6 +403,12 @@ describe("route — dispatch with valid credentials", () => {
         available: false,
         mutation: false,
       });
+      if (action === "check_init" || action === "setup") {
+        expect(JSON.parse(result.body), action).toMatchObject({
+          message: "This feature is not available in the Worker backend yet.",
+          error: "This feature is not available in the Worker backend yet.",
+        });
+      }
     }
   });
 
@@ -524,9 +530,14 @@ describe("route — dispatch with valid credentials", () => {
     expect(JSON.parse(result.body)).toMatchObject({
       action: "save_config",
       success: false,
+      ok: false,
       available: false,
       mutation: false,
       code: "BACKEND_NOT_AVAILABLE",
+      message:
+        "Dashboard configuration writes are unavailable by design. Do not enter secrets in the browser. Operators must change Cloudflare Worker variables and Secrets out of band. Configuration is not persisted to D1.",
+      error:
+        "Dashboard configuration writes are unavailable by design. Do not enter secrets in the browser. Operators must change Cloudflare Worker variables and Secrets out of band. Configuration is not persisted to D1.",
     });
   });
 

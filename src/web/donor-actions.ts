@@ -368,6 +368,9 @@ const MESSAGES: Readonly<Record<DonorActionCode, string>> = {
   ADAPTER_REQUIRED: "This donor action has not been adapted to the Worker API yet.",
 };
 
+const SAVE_CONFIG_MESSAGE =
+  "Dashboard configuration writes are unavailable by design. Do not enter secrets in the browser. Operators must change Cloudflare Worker variables and Secrets out of band. Configuration is not persisted to D1.";
+
 export interface DonorActionFailure {
   readonly success: false;
   readonly ok: false;
@@ -389,7 +392,11 @@ export function unsupportedDonorAction(action: string): {
   const code = knownCode ?? "ACTION_NOT_AVAILABLE";
   const safeAction = /^[a-z0-9_]{1,64}$/.test(action) ? action : "unknown";
   const message =
-    knownCode === undefined ? "This donor action is not available." : MESSAGES[knownCode];
+    action === "save_config"
+      ? SAVE_CONFIG_MESSAGE
+      : knownCode === undefined
+        ? "This donor action is not available."
+        : MESSAGES[knownCode];
   const body: DonorActionFailure = {
     success: false,
     ok: false,

@@ -1,7 +1,8 @@
 # OWNER DECISION — `save_config` and monthly billing
 
-**Status:** Decision-only. This document **does not** authorize implementation,
-production enablement, IAM expansion, or UPDATE/RELEASE/PRE-FLIGHT dispatch.
+**Status:** Decision/history. Issue #128 Option C is approved and its donor-facing
+UX is implemented. This document **does not** authorize production enablement,
+IAM expansion, or UPDATE/RELEASE/PRE-FLIGHT dispatch.
 
 Parent tracking: Epic **#77**, follow-up **#116**. Related production UPDATE
 packet: `docs/release/p7-web-console-production-update-packet.md` (tip
@@ -9,18 +10,22 @@ packet: `docs/release/p7-web-console-production-update-packet.md` (tip
 
 ---
 
-## 1. `save_config` persistence — Issue **#128**
+## 1. `save_config` persistence — Issue **#128** (Option C approved)
 
 **Current code:** authenticated donor `save_config` remains a **PLACEHOLDER**
-(`BACKEND_NOT_AVAILABLE`). Secrets must never enter D1 or the browser.
+(`BACKEND_NOT_AVAILABLE`, HTTP 501). Option C is implemented: the API failure,
+disabled dashboard button, visible notice, and alert explain that dashboard
+configuration writes are unavailable by design. Operators change Cloudflare
+Worker variables and Secrets out of band. Nothing is persisted to D1, and secrets
+must never be entered in the browser. No production authorization is implied.
 
-### Options (pick one in a comment on #128)
+### Options considered
 
 | Option | Summary | Risk / notes |
 | --- | --- | --- |
 | **A — Defer indefinitely (recommended default)** | Dashboard config writes stay unavailable. Operators change Worker vars/Secrets out-of-band. | Lowest risk. |
 | **B — Non-secret prefs only** | Narrow allowlist of non-secret prefs in D1. Explicit denylist for `ALIYUN_*`, `ADMIN_TOKEN`, `WEBHOOK_*`, `SMTP_*`, `TELEGRAM_*`. | Requires a focused implementation issue after the pick. |
-| **C — Reject with clearer UX only** | No persistence; improve donor-facing message / docs only. | Docs/UX only; no new storage. |
+| **C — Reject with clearer UX only (approved)** | No persistence; improve donor-facing message / docs only. | Implemented for #128; no new storage. |
 
 ### Non-goals
 
@@ -28,7 +33,8 @@ packet: `docs/release/p7-web-console-production-update-packet.md` (tip
 - No HTTP ECS control authority changes.
 - No production deploy from #128 alone.
 
-**Until the owner comments A/B/C on #128, that Issue stays OPEN and blocks coding.**
+The #128 decision is complete. Any production UPDATE remains separately owner
+authorized; this decision does not authorize deployment or secret changes.
 
 ---
 
