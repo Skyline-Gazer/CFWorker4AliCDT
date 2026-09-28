@@ -284,6 +284,7 @@ describe("route — dispatch with valid credentials", () => {
       billing: () =>
         Promise.resolve({
           enabled: true,
+          monthly_available: false,
           monthly_cost: null,
           balance: 25.5,
           currency: "CNY",
@@ -301,6 +302,7 @@ describe("route — dispatch with valid credentials", () => {
       available: true,
       data: {
         enabled: true,
+        monthly_available: false,
         monthly_cost: null,
         balance: 25.5,
         currency: "CNY",
@@ -318,13 +320,20 @@ describe("route — dispatch with valid credentials", () => {
     expect(JSON.parse(disabledResult.body)).toMatchObject({
       success: true,
       available: false,
-      data: { enabled: false, balance: null, monthly_cost: null, error: null },
+      data: {
+        enabled: false,
+        monthly_available: false,
+        balance: null,
+        monthly_cost: null,
+        error: null,
+      },
     });
 
     const failed = harness({
       billing: () =>
         Promise.resolve({
           enabled: true,
+          monthly_available: false,
           monthly_cost: null,
           balance: null,
           currency: null,
@@ -339,7 +348,12 @@ describe("route — dispatch with valid credentials", () => {
       success: false,
       available: true,
       error: "BSS billing request failed.",
-      data: { enabled: true, balance: null, monthly_cost: null },
+      data: {
+        enabled: true,
+        monthly_available: false,
+        balance: null,
+        monthly_cost: null,
+      },
     });
   });
 

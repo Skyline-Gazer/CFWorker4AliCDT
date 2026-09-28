@@ -314,7 +314,8 @@ export const BSS_ENDPOINT = "bssopenapi.aliyuncs.com";
 
 export interface DonorCostInfo {
   readonly enabled: boolean;
-  readonly monthly_cost: number | null;
+  readonly monthly_available: false;
+  readonly monthly_cost: null;
   readonly balance: number | null;
   readonly currency: string | null;
   readonly error: string | null;
@@ -347,11 +348,19 @@ function finiteAmount(value: unknown): number | undefined {
 /** Read BSS account cash balance through the shared signed RPC boundary. */
 export async function queryBssBilling(options: QueryBssBillingOptions): Promise<DonorCostInfo> {
   if (!options.enabled) {
-    return { enabled: false, monthly_cost: null, balance: null, currency: null, error: null };
+    return {
+      enabled: false,
+      monthly_available: false,
+      monthly_cost: null,
+      balance: null,
+      currency: null,
+      error: null,
+    };
   }
 
   const unavailable = (error: string): DonorCostInfo => ({
     enabled: true,
+    monthly_available: false,
     monthly_cost: null,
     balance: null,
     currency: null,
@@ -380,7 +389,14 @@ export async function queryBssBilling(options: QueryBssBillingOptions): Promise<
 
   // Monthly spend stays null: the balance API reports a point-in-time cash
   // balance, not a monthly bill. Never present it as spend or a zero bill.
-  return { enabled: true, monthly_cost: null, balance, currency, error: null };
+  return {
+    enabled: true,
+    monthly_available: false,
+    monthly_cost: null,
+    balance,
+    currency,
+    error: null,
+  };
 }
 
 /**

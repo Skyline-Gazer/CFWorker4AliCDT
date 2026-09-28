@@ -205,18 +205,12 @@
                         <span class="text-sm font-medium text-gray-500">实例</span>
                         <span class="text-sm font-medium text-[#1C1C1E] font-mono">{{ item.account }}</span>
                     </div>
-                    <div v-if="isAdmin && item.cost && item.cost.enabled" class="flex justify-between items-center">
-                        <span class="text-sm font-medium text-gray-500">本月费用</span>
-                        <span v-if="!item.cost.error" class="text-xs font-medium">
-                            <span v-if="item.cost.monthly_cost !== null" class="font-bold text-orange-500">{{
-                                item.cost.currency === 'USD' ? '$' : '¥' }}{{
-                                item.cost.monthly_cost }}</span>
-                            <span v-if="item.cost.monthly_cost !== null && item.cost.balance !== null"
-                                class="text-gray-300 mx-1">|</span>
-                            <span v-if="item.cost.balance !== null" class="text-gray-400">余<span class="font-bold"
-                                    :class="parseFloat(item.cost.balance) < 100 ? 'text-red-500' : 'text-green-600'">{{
-                                    item.cost.currency === 'USD' ? '$' : '¥' }}{{
-                                    item.cost.balance }}</span></span>
+                    <div v-if="isAdmin && item.cost && item.cost.enabled && (item.cost.balance !== null || item.cost.error)" class="flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-500">账户余额</span>
+                        <span v-if="!item.cost.error && item.cost.balance !== null" class="text-xs font-medium text-gray-400">
+                            <span class="font-bold"
+                                :class="parseFloat(item.cost.balance) < 100 ? 'text-red-500' : 'text-green-600'">{{
+                                item.cost.currency === 'USD' ? '$' : '¥' }}{{ item.cost.balance }}</span>
                         </span>
                         <span v-else class="text-[10px] text-gray-400">{{ item.cost.error }}</span>
                     </div>
@@ -571,10 +565,8 @@
                                         </svg>
                                         <div
                                             class="tooltip-content absolute bottom-full mb-2 w-64 md:w-72 p-4 bg-[#1C1C1E]/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-50 border border-gray-700 pointer-events-none text-left leading-relaxed">
-                                            <p class="text-gray-300">调用阿里云 BSS 费用中心 API，在实例卡片上显示<span
-                                                    class="text-orange-400 font-bold">本月费用</span>和<span
-                                                    class="text-green-400 font-bold">账户余额</span>。需要 AccessKey 具有
-                                                bssapi 权限。</p>
+                                            <p class="text-gray-300">调用阿里云 BSS 费用中心 API 查询账户余额；本月费用不可用。需要
+                                                AccessKey 具有 bssapi 权限。</p>
                                             <div
                                                 class="absolute top-full left-10 md:left-1/2 md:-translate-x-1/2 -mt-2 border-8 border-transparent border-t-[#1C1C1E]/95">
                                             </div>

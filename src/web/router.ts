@@ -367,7 +367,14 @@ async function dispatchDonorAction(
   if (action === "get_billing") {
     const cost =
       deps.billing === undefined
-        ? { enabled: false, monthly_cost: null, balance: null, currency: null, error: null }
+        ? {
+            enabled: false,
+            monthly_available: false as const,
+            monthly_cost: null,
+            balance: null,
+            currency: null,
+            error: null,
+          }
         : await deps.billing();
     return jsonResult(200, adaptDonorBilling(cost));
   }

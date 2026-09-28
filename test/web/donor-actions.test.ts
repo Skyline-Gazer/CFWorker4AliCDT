@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  adaptDonorBilling,
   adaptDonorConfig,
   adaptDonorHistory,
   adaptDonorLogs,
@@ -191,6 +192,7 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       },
       billing: {
         enabled: true,
+        monthly_available: false,
         monthly_cost: null,
         balance: 17.25,
         currency: "CNY",
@@ -214,6 +216,7 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
       traffic_summation_scope: "all TrafficDetails entries",
       cost: {
         enabled: true,
+        monthly_available: false,
         monthly_cost: null,
         balance: 17.25,
         currency: "CNY",
@@ -226,6 +229,26 @@ describe("adaptDonorStatus — singleton read-model mapping", () => {
     });
     expect(result.data[0]).not.toHaveProperty("accounts");
     expect(JSON.stringify(result)).not.toContain("ADMIN_TOKEN");
+  });
+
+  it("preserves the explicit monthly billing availability flag", () => {
+    const result = adaptDonorBilling({
+      enabled: true,
+      monthly_available: false,
+      monthly_cost: null,
+      balance: 17.25,
+      currency: "CNY",
+      error: null,
+    });
+
+    expect(result.data).toEqual({
+      enabled: true,
+      monthly_available: false,
+      monthly_cost: null,
+      balance: 17.25,
+      currency: "CNY",
+      error: null,
+    });
   });
 
   it("keeps unavailable query values unknown and does not fabricate a status row", () => {

@@ -1,8 +1,9 @@
 # OWNER DECISION — `save_config` and monthly billing
 
-**Status:** Decision/history. Issue #128 Option C is approved and its donor-facing
-UX is implemented. This document **does not** authorize production enablement,
-IAM expansion, or UPDATE/RELEASE/PRE-FLIGHT dispatch.
+**Status:** Decision/history. Issue #128 Option C and Issue #129 Option C are
+approved and their donor-facing UX/contracts are implemented. This document
+**does not** authorize production enablement, IAM expansion, or
+UPDATE/RELEASE/PRE-FLIGHT dispatch.
 
 Parent tracking: Epic **#77**, follow-up **#116**. Related production UPDATE
 packet: `docs/release/p7-web-console-production-update-packet.md` (tip
@@ -38,26 +39,31 @@ authorized; this decision does not authorize deployment or secret changes.
 
 ---
 
-## 2. Monthly billing availability — Issue **#129**
+## 2. Monthly billing availability — Issue **#129** (Option C approved and implemented)
 
 **Current code:** `get_billing` can expose **balance** when `ENABLE_BILLING` is
-on **and** BSS `QueryAccountBalance` IAM is authorized. **Monthly spend is NOT
-AVAILABLE** from that API (`monthly_cost: null`).
+on **and** BSS `QueryAccountBalance` IAM is authorized. The adapter returns
+`monthly_available: false` and `monthly_cost: null`; the donor UI hides monthly
+spend and labels any displayed amount as **账户余额**. Billing remains behind
+the existing gate, balance behavior is unchanged, and no IAM permission or BSS
+Action was added. Production billing remains disabled unless separately
+authorized; this decision does not authorize production changes.
 
-### Options (pick one in a comment on #129)
+### Options considered
 
 | Option | Summary | Risk / notes |
 | --- | --- | --- |
-| **A — Accept “monthly unavailable” (recommended default)** | Keep `monthly_cost: null` for this surface; document in UI/matrix. No new RAM. | Lowest risk. |
+| **A — Accept “monthly unavailable”** | Keep `monthly_cost: null` for this surface; document in UI/matrix. No new RAM. | Monthly spend remains unavailable. |
 | **B — Add a monthly bill API** | Choose a specific Alibaba BSS OpenAPI Action + RAM action; define donor fields; separate production enablement (still behind billing gate(s)). | Requires explicit IAM expansion authorization. |
-| **C — Hide monthly UI** | Adapter exposes a clear `monthly_available: false` (or equivalent) so the UI does not imply spend data exists. | Docs + small adapter tweak; no new IAM. |
+| **C — Hide monthly UI (approved and implemented)** | Adapter exposes `monthly_available: false`, keeps `monthly_cost: null`, and the UI shows balance only. | No new IAM; existing balance gate and path are preserved. |
 
 ### Non-goals
 
 - Do not expand RAM automatically.
 - Do not set `ENABLE_BILLING` in production from #129 alone.
 
-**Until the owner comments A/B/C on #129, that Issue stays OPEN.**
+Issue #129 Option C is implemented in this worktree. No production authorization,
+PRE-FLIGHT, RELEASE, UPDATE, IAM expansion, or billing activation is implied.
 
 ---
 

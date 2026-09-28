@@ -100,7 +100,7 @@ export function adaptDonorBilling(cost: DonorCostInfo): DonorBillingResponse {
     success,
     mutation: false,
     available,
-    data: cost,
+    data: { ...cost, monthly_available: false, monthly_cost: null },
     ...(cost.enabled && cost.error !== null ? { error: redact(cost.error) } : {}),
   };
 }
@@ -241,7 +241,8 @@ export function adaptDonorStatus(value: unknown): DonorStatusResponse {
     rawCost !== undefined && typeof rawCost.enabled === "boolean"
       ? {
           enabled: rawCost.enabled,
-          monthly_cost: finiteNonNegative(rawCost.monthly_cost) ?? null,
+          monthly_available: false as const,
+          monthly_cost: null,
           balance:
             typeof rawCost.balance === "number" && Number.isFinite(rawCost.balance)
               ? rawCost.balance
