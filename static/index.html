@@ -931,9 +931,15 @@
                                 添加账号</button>
 
                             <div class="flex justify-end pt-6">
-                                <button @click="saveConfig"
-                                    class="bg-[#1C1C1E] text-white px-10 py-4 rounded-2xl font-bold shadow-xl tap-effect hover:shadow-2xl transition-all">保存所有配置</button>
+                                <button @click="saveConfig" disabled
+                                    title="此 Worker 按设计不提供浏览器配置写入功能。"
+                                    aria-describedby="config-save-unavailable-notice"
+                                    class="bg-gray-200 text-gray-700 px-10 py-4 rounded-2xl font-bold shadow-none cursor-not-allowed opacity-70">保存所有配置（不可用）</button>
                             </div>
+                            <p id="config-save-unavailable-notice" role="note"
+                                class="mt-3 text-right text-sm text-gray-700">
+                                配置保存不可用：请勿在浏览器中输入密钥。请由运维人员在 Cloudflare Worker variables 和 Secrets 中站外修改配置；此页面不会将配置持久化到 D1。
+                            </p>
                         </div>
                     </div>
 
@@ -1540,7 +1546,7 @@
 
                 const saveConfig = async () => {
                     if (!config.value) return;
-                    alert('此 Worker 没有浏览器配置写入接口。请勿在此页面输入密钥；配置由 Cloudflare Worker variables 和 Secrets 管理。');
+                    alert('此 Worker 按设计不提供浏览器配置写入功能。请勿在浏览器中输入任何密钥。请由运维人员在 Cloudflare Worker variables 和 Secrets 中站外修改配置；此页面不会将配置持久化到 D1。');
                 };
 
                 // 获取系统日志 (带Tab参数)
@@ -1590,18 +1596,18 @@
                 };
 
                 const sendTestEmail = async () => {
-                    if (!config.value || !config.value.Notification.email) { alert('请先填写接收邮箱并保存配置'); return; }
+                    if (!config.value || !config.value.Notification.email) { alert('此 Worker 不提供浏览器配置保存。邮件测试请依赖已在 Cloudflare Worker 中配置的 SMTP；请勿在此页面输入密钥。'); return; }
                     if (!confirm('发送测试邮件将使用已保存的配置。继续发送吗？')) { return; }
                     alert('此 Worker 没有测试邮件接口；未发送邮件。');
                 };
 
                 const sendTestTelegram = async () => {
-                    if (!config.value || !config.value.Notification.telegram.token || !config.value.Notification.telegram.chat_id) { alert('请先填写Token和Chat ID，建议保存后再测试'); return; }
+                    if (!config.value || !config.value.Notification.telegram.token || !config.value.Notification.telegram.chat_id) { alert('此 Worker 不提供浏览器配置保存。Telegram 测试请依赖已在 Cloudflare Worker Secrets 中配置的 Token/Chat ID；请勿在此页面输入密钥。'); return; }
                     alert('此 Worker 没有 Telegram 测试接口；未发送消息。');
                 };
 
                 const sendTestWebhook = async () => {
-                    if (!config.value || !config.value.Notification.webhook.url) { alert('请先填写Webhook URL，建议保存后再测试'); return; }
+                    if (!config.value || !config.value.Notification.webhook.url) { alert('此 Worker 不提供浏览器配置保存。Webhook 测试请依赖已在 Cloudflare Worker 中配置的 WEBHOOK_URL；请勿在此页面输入密钥。'); return; }
                     alert('此 Worker 没有 Webhook 测试接口；未发送请求。');
                 };
 
