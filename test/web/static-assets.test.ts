@@ -57,6 +57,15 @@ describe("donor static asset import", () => {
     expect(tailwind.slice(0, 100)).toContain("MIT License");
   });
 
+  it("marks save_config unavailable in the donor UI (Issue #128 Option C)", () => {
+    const html = readFileSync(asset("index.html"), "utf8");
+    expect(html).toMatch(/@click="saveConfig"[^>]*\bdisabled\b/);
+    expect(html).toContain("保存所有配置（不可用）");
+    expect(html).toContain('id="config-save-unavailable-notice"');
+    expect(html).toContain("不会将配置持久化到 D1");
+    expect(html).not.toMatch(/\?action=save_config/);
+  });
+
   it("contains a PNG icon asset", () => {
     const icon = readFileSync(asset("icon.png"));
     expect([...icon.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);

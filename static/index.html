@@ -1596,18 +1596,18 @@
                 };
 
                 const sendTestEmail = async () => {
-                    if (!config.value || !config.value.Notification.email) { alert('请先填写接收邮箱并保存配置'); return; }
+                    if (!config.value || !config.value.Notification.email) { alert('此 Worker 不提供浏览器配置保存。邮件测试请依赖已在 Cloudflare Worker 中配置的 SMTP；请勿在此页面输入密钥。'); return; }
                     if (!confirm('发送测试邮件将使用已保存的配置。继续发送吗？')) { return; }
                     alert('此 Worker 没有测试邮件接口；未发送邮件。');
                 };
 
                 const sendTestTelegram = async () => {
-                    if (!config.value || !config.value.Notification.telegram.token || !config.value.Notification.telegram.chat_id) { alert('请先填写Token和Chat ID，建议保存后再测试'); return; }
+                    if (!config.value || !config.value.Notification.telegram.token || !config.value.Notification.telegram.chat_id) { alert('此 Worker 不提供浏览器配置保存。Telegram 测试请依赖已在 Cloudflare Worker Secrets 中配置的 Token/Chat ID；请勿在此页面输入密钥。'); return; }
                     alert('此 Worker 没有 Telegram 测试接口；未发送消息。');
                 };
 
                 const sendTestWebhook = async () => {
-                    if (!config.value || !config.value.Notification.webhook.url) { alert('请先填写Webhook URL，建议保存后再测试'); return; }
+                    if (!config.value || !config.value.Notification.webhook.url) { alert('此 Worker 不提供浏览器配置保存。Webhook 测试请依赖已在 Cloudflare Worker 中配置的 WEBHOOK_URL；请勿在此页面输入密钥。'); return; }
                     alert('此 Worker 没有 Webhook 测试接口；未发送请求。');
                 };
 
