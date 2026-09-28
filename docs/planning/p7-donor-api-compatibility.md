@@ -38,8 +38,10 @@ only actual D1 totals and stored reasons; old/missing reasons remain unknown,
 and chart series contain no zero-filled points or inferred regional history.
 `get_billing` is an authenticated read-only action: it fails closed when billing is off and adapts the BSS balance response only when enabled and authorized. Its `monthly_available: false` flag keeps the donor UI balance-only; monthly spend remains unavailable. `control_instance`, `clear_logs`, and `logout` remain placeholders;
 `check_init`, setup, and configuration writes remain unavailable. Notification
-test actions stay fail-closed placeholders (SMTP/webhook/Telegram report
-configuration codes; no browser notification authority). The donor logs view is a projection of the same bounded
+test actions are gated adapters with default-off production gates. The gates
+remain unset and transports are unset; observed live `send_test_*` responses
+are HTTP 501 `*_NOT_CONFIGURED`. There is no browser notification authority.
+The donor logs view is a projection of the same bounded
 `traffic_checks` observations, with stored error text redacted before response.
 
 ## Action matrix
@@ -85,7 +87,7 @@ the browser or D1; notification test actions stay fail-closed (no fake success).
 - Manual SMTP test-send is available only behind `ENABLE_MANUAL_SMTP_TEST` and configured `SMTP_HOST`/`SMTP_FROM`; the variable is an owner gate and remains unset by default. Manual Telegram test-send is available only behind `ENABLE_MANUAL_TELEGRAM_TEST` and configured `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`; the variable is an owner gate and remains unset by default. Manual webhook test-send is available only behind `ENABLE_MANUAL_WEBHOOK_TEST` and configured `WEBHOOK_URL`; that variable remains documented as an owner gate and unset by default. Scheduled Cron webhook sender is unchanged.
 - Issue #128 selected **Option C — reject with clearer UX**. The donor save control is disabled, the UI notice and alert explain the policy, and `save_config` still returns HTTP 501 `BACKEND_NOT_AVAILABLE`. There is no config-write path and no D1 persistence: operators must not enter secrets in the dashboard (fields may still exist in the donor UI shell), the API never returns secret values, and operators change Cloudflare Worker variables and Secrets out of band.
 - Billing is an optional balance adapter behind `ENABLE_BILLING` and an owner-authorized BSS permission; the adapter returns `monthly_available: false`, keeps `monthly_cost: null`, and the donor UI shows balance only. Issue #129 Option C is implemented without new IAM or production activation.
-- Production Worker may still run an older SHA until a future owner UPDATE; this audit is about **main tip** parity docs/code, not live deploy.
+- **Production status:** live production Worker tip is `38a3e09` (Worker Version ID `5d7001df-35ed-460e-bd00-ad1ef07194c7`; UPDATE run [36430555069](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36430555069) SUCCESS). Docs/code tip and production tip are aligned for this closeout.
 
 ### Verdict
 

@@ -1,33 +1,38 @@
-# OWNER REVIEW — PRODUCTION UPDATE PACKET
+# P7 CLOSEOUT — PRODUCTION UPDATE SETTLEMENT
 
-**Scope:** Existing-Worker UPDATE path for Skyline-Gazer/CFWorker4AliCDT. This is
-an owner review packet only. It authorizes **no production deployment**.
+**Scope:** Closeout record for the existing-Worker UPDATE path for
+Skyline-Gazer/CFWorker4AliCDT. The production UPDATE completed successfully;
+this document records the verified deployment and post-UPDATE observation.
 
 ## Program and revision
 
 ```text
-PROGRAM_STATUS=UPDATE_PATH_MERGED_AWAITING_OWNER_AUTHORIZATION
-CURRENT_MAIN_SHA=5bc2ebebe6c12cb1cbc752c14422812561ff040d
-RECOMMENDED_UPDATE_SHA=5bc2ebebe6c12cb1cbc752c14422812561ff040d
-LAST_PRODUCTION_DEPLOYED_SHA=76f093f38acc94d609eccddcdb1c6db77f290109
+PROGRAM_STATUS=UPDATE_SUCCESSFUL_POST_UPDATE_OBSERVED
+CURRENT_MAIN_SHA=38a3e09b38411b140deb5a1d2dffb349b4fdb302
+RECOMMENDED_UPDATE_SHA=38a3e09b38411b140deb5a1d2dffb349b4fdb302
+LAST_PRODUCTION_DEPLOYED_SHA=38a3e09b38411b140deb5a1d2dffb349b4fdb302
 ISSUE=Refs #116 #77 #128 #129
-PRODUCTION_DEPLOYED=NO
-NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE (tip 5bc2ebe) + separate ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
+PRODUCTION_DEPLOYED=YES
+WORKER_VERSION_ID=5d7001df-35ed-460e-bd00-ad1ef07194c7
+UPDATE_RUN=https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36430555069 SUCCESS
+NEXT_OWNER_GATE=#90–#93 deferred OWNER_GATE backlog + optional ENABLE_MANUAL_* / ENABLE_BILLING decisions; no further UPDATE of this live tip
 ```
 
 ## CI result
 
 ```text
-TIP_MERGE_COMMITS=#123 dcda7b0 (webhook), #125 5cfd1b6 (Telegram), #127 19cea6a (SMTP), #131 a9d25e0 (save_config UX), #132 51c5d3c (monthly billing UX)
+TIP_MERGE_COMMITS=#123 dcda7b0 (webhook), #125 5cfd1b6 (Telegram), #127 19cea6a (SMTP), #131 a9d25e0 (save_config UX), #132 51c5d3c (monthly billing UX), #134 38a3e09 (docs sync; live tip)
 TIP_CI=SUCCESS on each feature PR (Format, lint, typecheck, test); docs PRs as applicable
 LOCAL_VALIDATE=PASS (Node 22; 912 tests on #129 tip before merge)
-PRODUCTION_DEPLOYED_FOR_TIP_5bc2ebe=NO
-UPDATE_DISPATCHED=NO
+PRODUCTION_DEPLOYED_FOR_TIP_38a3e09=YES
+UPDATE_DISPATCHED=YES (https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36430555069 SUCCESS)
 ```
 
-## Production diff summary (since last deployed `76f093f`)
+## Production diff summary (history since previous deployment `76f093f`)
 
-Commits on current `main` after last deployed production SHA `76f093f`:
+The feature commits below remain the application history since previous
+production SHA `76f093f`. The current live tip also includes #134 `38a3e09`, a
+docs sync; the UPDATE deployed that tip.
 
 | SHA | Summary |
 | --- | --- |
@@ -38,6 +43,7 @@ Commits on current `main` after last deployed production SHA `76f093f`:
 | `a9d25e0` (#131 / #128) | FEATURE/UX — `save_config` Option C clearer unavailable UX (still HTTP 501 `BACKEND_NOT_AVAILABLE`; no persistence) |
 | `51c5d3c` (#132 / #129) | FEATURE/UX — monthly billing Option C: `monthly_available: false`; balance-only donor UI; no new IAM |
 | `5bc2ebe` (#133) | DOCS — UPDATE packet refresh for tip including #128/#129 Option C |
+| `38a3e09` (#134) | DOCS — closeout sync for the live production tip |
 
 Application paths changed vs `76f093f` (excluding pure docs/tests): `scripts/resolve-deploy-config.mjs`, `src/aliyun/api.ts`, `src/config.ts`, `src/index.ts`, `src/notify/smtp.ts`, `src/notify/telegram.ts`, `src/web/donor-actions.ts`, `src/web/router.ts`, `static/index.html`, plus workflow var passthrough for the three `ENABLE_MANUAL_*` gates.
 
@@ -48,8 +54,8 @@ Application paths changed vs `76f093f` (excluding pure docs/tests): `scripts/res
   - `send_test_webhook` when `WEBHOOK_URL` configured **and** `ENABLE_MANUAL_WEBHOOK_TEST` truthy
   - `send_test_telegram` when Telegram credentials configured **and** `ENABLE_MANUAL_TELEGRAM_TEST` truthy
   - `send_test_email` when `SMTP_HOST`/`SMTP_FROM` configured **and** `ENABLE_MANUAL_SMTP_TEST` truthy
-  - With credentials present but gate off → explicit `*_MANUAL_*_TEST_DISABLED` (501). With gate on, transport failure returns honest non-500 JSON (`mutation: false`).
-  - **All three gates must remain unset in production** unless a **separate** owner authorization enables them.
+  - Production gates remain unset and transports are unset; live calls returned HTTP 501 `*_NOT_CONFIGURED`. With credentials present but gate off → explicit `*_MANUAL_*_TEST_DISABLED` (501). With gate on, transport failure returns honest non-500 JSON (`mutation: false`).
+  - **All three gates remain unset in production** unless a **separate** owner authorization enables them.
 - Cron scheduled webhook sender unchanged. SMTP details: `docs/architecture/worker-smtp.md` (no nodemailer; port 25 prohibited; 465 TLS / 587 STARTTLS).
 - `get_billing` — fail-closed when `ENABLE_BILLING` off; **ADAPTER** balance-only when on **and** BSS IAM present. Option C (**#129** landed): `monthly_available: false`, `monthly_cost: null`; donor UI shows **账户余额** only and states monthly spend unavailable. **No new BSS/IAM.**
 - `control_instance` remains **PLACEHOLDER**; Cron (`*/10 * * * *`) is the sole ECS mutation authority.
@@ -76,11 +82,11 @@ NEWER_THAN_0002=NONE
 EXPECTED_REMOTE_MIGRATION_WORK_THIS_UPDATE=none beyond re-apply no-op if already applied
 ```
 
-## Expected Cron / domain / Secret state (unchanged)
+## Verified Cron / domain / Secret state
 
 ```text
-EXPECTED_CRON_AFTER_UPDATE=*/10 * * * *
-EXPECTED_DOMAIN=cdt.q9m3.com (custom_domain exposure; owner confirms current mode)
+CRON=*/10 * * * *
+DOMAIN=cdt.q9m3.com
 EXPECTED_SECRETS_REQUIRED=ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET, ADMIN_TOKEN
 SECRETS_VALUES=unchanged (workflow verifies names only; never prints values)
 ```
@@ -92,22 +98,28 @@ SECRETS_VALUES=unchanged (workflow verifies names only; never prints values)
 - Required inputs (no defaults): `confirmation=UPDATE`, `EXISTING_WORKER_CONFIRMED=YES`, explicit `HTTP_EXPOSURE_MODE=custom_domain` (or `workers_dev` if that is the live mode).
 - Order: validate → resolve UPDATE config → `wrangler d1 migrations apply` → `wrangler deploy` → assert required Worker Secret **names**.
 - **Rollback via UPDATE only** (restore known-good application code on `main`, then UPDATE). **Never PRE-FLIGHT** against the live Cron service — PRE-FLIGHT emits `triggers.crons = []` and would remove the schedule.
-- **Do not dispatch UPDATE for tip `5bc2ebe` until owner authorization.** This packet alone is not authorization.
 
-## Post-update acceptance checks (after future owner auth)
+## Post-UPDATE observation summary
 
-1. Worker version matches `CURRENT_MAIN_SHA` / `RECOMMENDED_UPDATE_SHA` (`5bc2ebe…`) or the owner-authorized tip.
-2. Cron still `*/10 * * * *`; domain still `cdt.q9m3.com` (if custom_domain).
-3. `GET /health` liveness OK; authenticated dashboard loads.
-4. `get_config` returns allowlisted non-secret fields only.
-5. `control_instance` still HTTP 501 / non-mutating.
-6. `save_config` still HTTP 501 `BACKEND_NOT_AVAILABLE`; donor save control disabled / unavailable notice visible.
-7. `ENABLE_MANUAL_WEBHOOK_TEST`, `ENABLE_MANUAL_TELEGRAM_TEST`, and `ENABLE_MANUAL_SMTP_TEST` remain **unset** unless a **separate** owner decision enabled them; with gates unset, configured transports still return `*_MANUAL_*_TEST_DISABLED` (or not-configured codes when bindings missing).
-8. `ENABLE_BILLING` remains unset/false unless a **separate** owner decision sets the variable **and** authorizes BSS IAM. When billing is off, fail-closed. When on, balance-only; `monthly_available: false`.
-9. No secret values appear in workflow logs.
-10. D1 still at migration `0002` (no newer migration expected).
+```text
+OBSERVATION_START=2026-09-28T14:46:20Z
+OBSERVATION_END≈2026-09-28T14:52:24Z
+EXPECTED_CRON_IN_WINDOW=1 OBSERVED=1 SUCCESS=1 FAILED=0
+LAST_SUCCESSFUL_EXECUTION=2026-09-28T14:50:38Z id=421
+POST_UPDATE_CRON_ROW=id=421 time=2026-09-28T14:50:38Z action=none-running
+PRE_UPDATE_CADENCE=~10min (ids 417–420)
+trafficBytes=40663500 → traffic_gb≈0.03787 (confirms 1024^3)
+threshold_gb=180; decision=fail-closed none-running while Running
+save_config=501 BACKEND_NOT_AVAILABLE (Option C message)
+get_billing=available:false monthly_available:false
+control_instance=501 FEATURE_NOT_IMPLEMENTED
+send_test_*=501 *_NOT_CONFIGURED (gates off + transports unset)
+ENABLE_*=unset before and after UPDATE (repo vars; remain off)
+CRON=*/10 * * * *
+DOMAIN=cdt.q9m3.com
+```
 
-## Remaining owner decisions (not activated by this packet)
+## Remaining owner decisions (not activated)
 
 | Topic | Issue | Packet |
 | --- | --- | --- |
@@ -119,17 +131,31 @@ SECRETS_VALUES=unchanged (workflow verifies names only; never prints values)
 ## Production action state
 
 ```text
-PRODUCTION_DEPLOYED=NO
+PRODUCTION_DEPLOYED=YES
+PRODUCTION_SHA=38a3e09b38411b140deb5a1d2dffb349b4fdb302
+WORKER_VERSION_ID=5d7001df-35ed-460e-bd00-ad1ef07194c7
 PRE_FLIGHT_DISPATCHED=NO
 RELEASE_DISPATCHED=NO
-UPDATE_DISPATCHED=NO
+UPDATE_DISPATCHED=YES (run 36430555069 SUCCESS)
 ENABLE_BILLING_IN_PRODUCTION=unset/off (confirmed in GitHub repository variables — not present)
 ENABLE_MANUAL_WEBHOOK_TEST_IN_PRODUCTION=unset/off (confirmed — not present)
 ENABLE_MANUAL_TELEGRAM_TEST_IN_PRODUCTION=unset/off (confirmed — not present)
 ENABLE_MANUAL_SMTP_TEST_IN_PRODUCTION=unset/off (confirmed — not present)
 BSS_IAM_APPLIED=NO
 GATES_90_93_ACTIVE=NO
-NEXT_OWNER_GATE=OWNER AUTHORIZATION — PRODUCTION UPDATE of 5bc2ebe (optional) + ENABLE_MANUAL_* / ENABLE_BILLING / #90–#93 decisions
+NEXT_OWNER_GATE=#90–#93 deferred OWNER_GATE backlog + optional ENABLE_MANUAL_* / ENABLE_BILLING decisions; no further UPDATE of this live tip
 ```
 
-No production Cron, domain, D1 database, Worker secret value, GitHub variable, or ECS resource was contacted or changed by preparing this packet.
+## P7 Milestone-1 closeout settlement
+
+Issue **#116** placeholder tracking is settled for the approved product-completion
+scope: the supported paths are implemented, gated, or explicitly deferred under
+the #128/#129 Option C decisions. Epic **#77 Milestone-1** and its approved
+product-completion scope are complete. Issues **#90–#93 remain open** as deferred
+`OWNER_GATE` backlog; they are not Done. The [donor compatibility matrix](../planning/p7-donor-api-compatibility.md)
+records capability status, and the [successful UPDATE run](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36430555069)
+plus this post-UPDATE observation summary record production evidence.
+
+This closeout documents the already-verified UPDATE. No PRE-FLIGHT or RELEASE
+was dispatched, and no enablement, D1 mutation, ECS mutation, or notification was
+performed as part of this documentation edit.
