@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
-import { syncIncident } from "./incident.mjs";
+import { syncIncidents } from "./incident.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -18,9 +18,9 @@ export async function runGh(args) {
 
 export async function main({ resultPath = "production-health-result.json", gh = runGh } = {}) {
   const result = JSON.parse(await readFile(resultPath, "utf8"));
-  // Reassert the invariant at the GitHub boundary even if an artifact was edited.
-  result.cron_health = "UNKNOWN";
-  await syncIncident(result, gh);
+  await syncIncidents(result, gh);
+  // Cron failures are tracked through their own Issue. Preserve #136's job
+  // failure semantics for HTTP health only.
   if (result.ok !== true) process.exitCode = 1;
   return result;
 }

@@ -16,6 +16,8 @@ interface ProductionHealthWorkflow {
         readonly uses?: string;
         readonly if?: string;
         readonly name?: string;
+        readonly run?: string;
+        readonly env?: Record<string, unknown>;
         readonly with?: Record<string, unknown>;
       }[];
     }
@@ -48,18 +50,23 @@ describe("production health workflow structure", () => {
     expect(workflow.permissions).toEqual({ contents: "read", issues: "write" });
   });
 
-  it("does not reference deploy credentials or secret contexts", () => {
-    expect(workflowSource).not.toContain("secrets.");
+  it("references only the dedicated monitor secret and no deploy credentials", () => {
+    expect(workflowSource.match(/secrets\.[A-Z0-9_]+/g)).toEqual(["secrets.MONITOR_READ_TOKEN"]);
     expect(workflowSource.toUpperCase()).not.toContain("CLOUDFLARE_");
     expect(workflowSource).not.toContain("ADMIN_TOKEN");
     expect(workflowSource).not.toContain("ALIYUN_ACCESS_KEY");
+    expect(workflowSource).not.toContain("UPDATE_TOKEN");
   });
 
   it("uploads the structured result for at least 30 days", () => {
     const steps = workflow.jobs?.probe?.steps ?? [];
     const upload = steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+    const probe = steps.find((step) => step.name === "Probe HTTP and Cron health");
     const incident = steps.find((step) => step.name === "Create, update, or close incident");
 
+    expect(probe?.run).toBe("node scripts/production-health/run-probe.mjs");
+    expect(probe?.env?.MONITOR_READ_TOKEN).toBe("${{ secrets.MONITOR_READ_TOKEN }}");
+    expect(probe?.env).not.toHaveProperty("ADMIN_TOKEN");
     expect(upload?.with?.path).toBe("production-health-result.json");
     expect(upload?.with?.["retention-days"]).toBeGreaterThanOrEqual(30);
     expect(incident?.if).toBe("always()");

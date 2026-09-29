@@ -4,6 +4,7 @@ import { route } from "../../src/web/router";
 import type { RouteDeps, RouteResult } from "../../src/web/router";
 import type { AuthConfig } from "../../src/web/auth";
 import type { HistoryRow } from "../../src/storage/read";
+import type { CronMonitorSnapshot } from "../../src/storage/cron-monitor";
 import { loadConfig } from "../../src/config";
 import { notify } from "../../src/notify/webhook";
 import type { NotifyOptions, RunReportLike } from "../../src/notify/webhook";
@@ -34,6 +35,7 @@ interface Harness {
     dashboard: number;
     history: number;
     query: number;
+    cronMonitor: number;
     historyLimit: number | undefined;
   };
 }
@@ -43,6 +45,7 @@ function harness(overrides: Partial<RouteDeps> = {}): Harness {
     dashboard: 0,
     history: 0,
     query: 0,
+    cronMonitor: 0,
     historyLimit: undefined,
   };
   const defaults: RouteDeps = {
@@ -72,6 +75,23 @@ function harness(overrides: Partial<RouteDeps> = {}): Harness {
       counts.history += 1;
       counts.historyLimit = limit;
       return Promise.resolve([]);
+    },
+    cronMonitor: () => {
+      counts.cronMonitor += 1;
+      const snapshot: CronMonitorSnapshot = {
+        observation_ts: "2026-09-29T00:00:00.000Z",
+        last_execution_ts: "2026-09-29T00:00:00.000Z",
+        last_success_ts: "2026-09-29T00:00:00.000Z",
+        latest_status: "success",
+        recent_success_count: 1,
+        recent_failure_count: 0,
+        failure_classification: null,
+        cron_health: "HEALTHY",
+        telemetry_available: true,
+        freshness_threshold_minutes: 25,
+        lookback_minutes: 1440,
+      };
+      return Promise.resolve(snapshot);
     },
     query: () => {
       counts.query += 1;
@@ -115,6 +135,101 @@ describe("route — public surface", () => {
     expect(counts.history).toBe(0);
     expect(counts.query).toBe(0);
     expect(counts.dashboard).toBe(0);
+  });
+});
+
+describe("route — dedicated Cron monitor authorization and response", () => {
+  const monitorToken = "monitor-read-test-token";
+
+  function monitorHarness(overrides: Partial<RouteDeps> = {}) {
+    return harness({ monitorReadToken: monitorToken, ...overrides });
+  }
+
+  it("serves bounded Cron fields with Bearer auth and disables caching", async () => {
+    const { deps, counts } = monitorHarness();
+    const result = await route(request("GET", "/api/monitor/cron", `Bearer ${monitorToken}`), deps);
+
+    expect(result.status).toBe(200);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(JSON.parse(result.body)).toMatchObject({
+      latest_status: "success",
+      cron_health: "HEALTHY",
+      telemetry_available: true,
+    });
+    expect(counts.cronMonitor).toBe(1);
+    expect("startInstance" in deps).toBe(false);
+    expect("stopInstance" in deps).toBe(false);
+  });
+
+  it.each([
+    ["missing authorization", undefined],
+    ["invalid bearer", "Bearer invalid-monitor-token"],
+    ["ADMIN_TOKEN bearer", "Bearer tok123"],
+    ["ADMIN_TOKEN basic", basic("admin", "tok123")],
+  ])("denies %s with the same no-store response", async (_label, authorization) => {
+    const { deps, counts } = monitorHarness();
+    const result = await route(request("GET", "/api/monitor/cron", authorization), deps);
+
+    expect(result.status).toBe(401);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(result.body).toBe(JSON.stringify({ error: "Unauthorized" }));
+    expect(counts.cronMonitor).toBe(0);
+  });
+
+  it.each([undefined, "", "   "])(
+    "denies when MONITOR_READ_TOKEN is unconfigured (%s)",
+    async (token) => {
+      const { deps, counts } = monitorHarness({ monitorReadToken: token });
+      const result = await route(
+        request("GET", "/api/monitor/cron", `Bearer ${monitorToken}`),
+        deps,
+      );
+
+      expect(result.status).toBe(401);
+      expect(result.body).toBe(JSON.stringify({ error: "Unauthorized" }));
+      expect(counts.cronMonitor).toBe(0);
+    },
+  );
+
+  it("rejects token-like query parameters even with a valid header", async () => {
+    const { deps, counts } = monitorHarness();
+    const result = await route(
+      request("GET", `/api/monitor/cron?access_token=${monitorToken}`, `Bearer ${monitorToken}`),
+      deps,
+    );
+
+    expect(result.status).toBe(401);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(counts.cronMonitor).toBe(0);
+    expect(result.body).not.toContain(monitorToken);
+  });
+
+  it("does not authorize from a query parameter alone", async () => {
+    const { deps, counts } = monitorHarness();
+    const result = await route(request("GET", `/api/monitor/cron?token=${monitorToken}`), deps);
+
+    expect(result.status).toBe(401);
+    expect(counts.cronMonitor).toBe(0);
+  });
+
+  it("keeps monitor method errors uncached", async () => {
+    const { deps } = monitorHarness();
+    const result = await route(
+      request("POST", "/api/monitor/cron", `Bearer ${monitorToken}`),
+      deps,
+    );
+
+    expect(result.status).toBe(405);
+    expect(result.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("never exposes monitor or admin credentials in its response", async () => {
+    const { deps } = monitorHarness();
+    const result = await route(request("GET", "/api/monitor/cron", `Bearer ${monitorToken}`), deps);
+
+    expect(result.body).not.toContain(monitorToken);
+    expect(result.body).not.toContain("tok123");
+    expect(result.body).not.toContain("Authorization");
   });
 });
 
@@ -1136,7 +1251,14 @@ describe("route — no mutating route exists (SPEC §8.5, A6)", () => {
     // Structural guarantee: `RouteDeps` has no `startInstance`/`stopInstance`
     // seam, so a future handler cannot reach one by accident.
     const { deps } = harness();
-    expect(Object.keys(deps).sort()).toEqual(["auth", "config", "dashboard", "history", "query"]);
+    expect(Object.keys(deps).sort()).toEqual([
+      "auth",
+      "config",
+      "cronMonitor",
+      "dashboard",
+      "history",
+      "query",
+    ]);
     expect(deps).not.toHaveProperty("startInstance");
     expect(deps).not.toHaveProperty("stopInstance");
   });

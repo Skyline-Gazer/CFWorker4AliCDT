@@ -38,6 +38,8 @@ import { connect } from "cloudflare:sockets";
 import { recordRun } from "./storage/history";
 import { readHistory, clampLimit } from "./storage/read";
 import type { HistoryRow } from "./storage/read";
+import { readCronMonitor, unavailableCronMonitor } from "./storage/cron-monitor";
+import type { CronHistoryRow } from "./storage/cron-monitor";
 import { route } from "./web/router";
 import { renderDashboard } from "./web/dashboard";
 import { runReadOnlyQuery } from "./web/query";
@@ -60,6 +62,7 @@ export interface Env {
   readonly STOPPED_MODE?: string;
   readonly ADMIN_USER?: string;
   readonly ADMIN_TOKEN?: string;
+  readonly MONITOR_READ_TOKEN?: string | undefined;
   readonly ENABLE_BILLING?: string;
   readonly ENABLE_MANUAL_WEBHOOK_TEST?: string;
   readonly ENABLE_MANUAL_TELEGRAM_TEST?: string;
@@ -288,6 +291,7 @@ export default {
 
     const result = await route(request, {
       auth,
+      monitorReadToken: env.MONITOR_READ_TOKEN,
       config: () => loadConfig(env),
       dashboard: async () => {
         if (env.ASSETS === undefined) {
@@ -301,6 +305,18 @@ export default {
         return { body: await response.text(), headers };
       },
       history: async (limit) => readHistoryFor(env, request, limit),
+      cronMonitor: async () => {
+        const db = env.TRAFFIC_DB;
+        if (db === undefined) return unavailableCronMonitor();
+        return readCronMonitor({
+          query: (sql, params) =>
+            db
+              .prepare(sql)
+              .bind(...params)
+              .all<CronHistoryRow>()
+              .then((outcome) => outcome.results),
+        });
+      },
       query: async () => readOnlyQuery(env),
       billing: async () => {
         const parsed = loadConfig(env);

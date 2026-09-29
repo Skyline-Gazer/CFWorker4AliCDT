@@ -1,7 +1,7 @@
 /**
  * HTTP route dispatch (SPEC §8.1, §8.5).
  *
- * The pathname surface is deliberately small and closed: four routes, one of
+ * The pathname surface is deliberately small and closed: five routes, one of
  * them public and inert. Supported donor query actions adapt those same
  * authenticated read paths; unsupported actions stay behind a failure facade.
  * Two properties are structural rather than conventional.
@@ -19,8 +19,9 @@
  * without the Worker runtime and so the caller owns serialisation.
  */
 
-import { authenticate, basicChallenge } from "./auth";
+import { authenticate, basicChallenge, constantTimeEqual } from "./auth";
 import type { AuthConfig } from "./auth";
+import type { CronMonitorSnapshot } from "../storage/cron-monitor";
 import {
   adaptDonorConfig,
   adaptDonorBilling,
@@ -45,12 +46,16 @@ export interface HandlerOutput {
 
 export interface RouteDeps {
   readonly auth: AuthConfig;
+  /** Dedicated Bearer credential for the read-only Cron monitor route. */
+  readonly monitorReadToken?: string | undefined;
   /** Validated config for the authenticated donor `get_config` projection. */
   readonly config: () => ConfigResult;
   /** `GET /` — server-rendered dashboard (SPEC §8.4). */
   readonly dashboard: () => HandlerOutput | Promise<HandlerOutput>;
   /** `GET /api/history` — bounded history (SPEC §9.5). Serialised as-is. */
   readonly history: (limit?: number) => Promise<readonly HistoryRow[]>;
+  /** `GET /api/monitor/cron` — bounded, sanitized D1 telemetry only. */
+  readonly cronMonitor: () => Promise<CronMonitorSnapshot>;
   /** `POST /api/query` — strictly read-only live query (SPEC §8.5). Serialised as-is. */
   readonly query: () => Promise<unknown>;
   /** Optional BSS balance read for authenticated donor billing actions. */
@@ -79,6 +84,7 @@ const ROUTES: readonly { readonly path: string; readonly methods: readonly strin
   { path: "/health", methods: ["GET"] },
   { path: "/", methods: ["GET"] },
   { path: "/api/history", methods: ["GET"] },
+  { path: "/api/monitor/cron", methods: ["GET"] },
   { path: "/api/query", methods: ["POST"] },
 ];
 
@@ -121,6 +127,31 @@ function authorize(request: Request, config: AuthConfig): boolean {
   return authenticate(request.headers.get("authorization"), config).ok;
 }
 
+/** Token-like query keys are rejected; this endpoint never reads URL credentials. */
+function hasCredentialQuery(url: URL): boolean {
+  for (const key of url.searchParams.keys()) {
+    if (/(?:token|auth|key|secret|credential|password|bearer)/i.test(key)) return true;
+  }
+  return false;
+}
+
+/** Dedicated Bearer-only auth. ADMIN_TOKEN and Basic credentials never apply. */
+function authorizeCronMonitor(request: Request, url: URL, token: string | undefined): boolean {
+  if (hasCredentialQuery(url) || typeof token !== "string" || token.trim() === "") return false;
+  const header = request.headers.get("authorization")?.trim();
+  if (header === undefined) return false;
+  const match = /^Bearer\s+(\S+)$/i.exec(header);
+  if (match === null) return false;
+  return constantTimeEqual(match[1] ?? "", token);
+}
+
+function monitorUnauthorized(): RouteResult {
+  return result(401, JSON.stringify({ error: "Unauthorized" }), {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+}
+
 /**
  * Dispatch one request.
  *
@@ -131,15 +162,23 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
   const url = new URL(request.url);
   const { pathname } = url;
   const method = request.method.toUpperCase();
-  const hasDonorAction = url.searchParams.has("action");
+  const isCronMonitorPath = pathname === "/api/monitor/cron";
+  const hasDonorAction = !isCronMonitorPath && url.searchParams.has("action");
 
   // Protect the full root and API namespaces before checking route existence or
   // method. The imported donor UI sends its legacy actions as `/?action=...`;
   // those must also authenticate before returning either a placeholder or 405.
   const protectedPath =
-    pathname === "/" || pathname === "/api" || pathname.startsWith("/api/") || hasDonorAction;
+    pathname === "/" ||
+    pathname === "/api" ||
+    (pathname.startsWith("/api/") && !isCronMonitorPath) ||
+    hasDonorAction;
   if (protectedPath && !authorize(request, deps.auth)) {
     return result(401, "Unauthorized", { "www-authenticate": basicChallenge() });
+  }
+
+  if (isCronMonitorPath && !authorizeCronMonitor(request, url, deps.monitorReadToken)) {
+    return monitorUnauthorized();
   }
 
   if (hasDonorAction) {
@@ -169,12 +208,20 @@ export async function route(request: Request, deps: RouteDeps): Promise<RouteRes
   if (!allowsMethod(pathname, method)) {
     // A real path with the wrong method. Reported as 405 so a client can tell a
     // typo from a missing route.
-    return result(405, "Method Not Allowed", { allow: allowedMethodsFor(pathname) });
+    return result(405, "Method Not Allowed", {
+      allow: allowedMethodsFor(pathname),
+      ...(isCronMonitorPath ? { "cache-control": "no-store" } : {}),
+    });
   }
 
   // Authentication before any work. A protected route must not reach its handler
   // with bad credentials, so nothing is invoked below this point until it passes.
-  if (!protectedPath && !PUBLIC_PATHS.includes(pathname) && !authorize(request, deps.auth)) {
+  if (
+    !isCronMonitorPath &&
+    !protectedPath &&
+    !PUBLIC_PATHS.includes(pathname) &&
+    !authorize(request, deps.auth)
+  ) {
     return result(401, "Unauthorized", { "www-authenticate": basicChallenge() });
   }
 
@@ -418,6 +465,28 @@ async function dispatch(pathname: string, deps: RouteDeps): Promise<RouteResult>
   if (pathname === "/api/history") {
     const rows = await deps.history();
     return result(200, JSON.stringify(rows), { "content-type": "application/json" });
+  }
+
+  if (pathname === "/api/monitor/cron") {
+    try {
+      return jsonResult(200, await deps.cronMonitor());
+    } catch {
+      // Do not let a read implementation accidentally expose driver text.
+      return jsonResult(200, {
+        observation_ts: new Date().toISOString(),
+        last_execution_ts: null,
+        last_success_ts: null,
+        latest_status: null,
+        recent_success_count: 0,
+        recent_failure_count: 0,
+        failure_classification: null,
+        cron_health: "UNKNOWN",
+        telemetry_available: false,
+        freshness_threshold_minutes: 25,
+        lookback_minutes: 1440,
+        telemetry_error: "D1_QUERY_FAILED",
+      } satisfies CronMonitorSnapshot);
+    }
   }
 
   // `/api/query` — the only remaining route in the table. It is strictly

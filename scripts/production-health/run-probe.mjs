@@ -2,20 +2,70 @@ import { appendFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import { probeHealth } from "./probe.mjs";
+import { probeCron } from "./probe.mjs";
 import { renderSummary } from "./render-summary.mjs";
 
-export async function main(env = process.env) {
+export async function probeProductionHealth({
+  httpUrl = "https://cdt.q9m3.com/health",
+  cronUrl = "https://cdt.q9m3.com/api/monitor/cron",
+  monitorToken,
+  runUrl = "",
+  fetchImpl = globalThis.fetch,
+  now = () => Date.now(),
+  delay,
+  timeoutMs = 10_000,
+  maxAttempts = 3,
+  backoffMs = 500,
+} = {}) {
+  const [http, cron] = await Promise.all([
+    probeHealth({
+      url: httpUrl,
+      runUrl,
+      fetchImpl,
+      now,
+      delay,
+      timeoutMs,
+      maxAttempts,
+      backoffMs,
+    }),
+    probeCron({
+      url: cronUrl,
+      token: monitorToken,
+      fetchImpl,
+      delay,
+      timeoutMs,
+      maxAttempts,
+      backoffMs,
+    }),
+  ]);
+
+  return {
+    ...http,
+    http_ok: http.ok,
+    http_status: http.http_status,
+    http_latency_ms: http.latency_ms,
+    http_failure_reason: http.failure_reason,
+    http_probe_url: http.probe_url,
+    http_attempts: http.attempts,
+    ...cron,
+  };
+}
+
+export async function main(env = process.env, options = {}) {
   const resultPath = env.PRODUCTION_HEALTH_RESULT_FILE || "production-health-result.json";
-  const probeUrl = env.PROBE_URL || "https://cdt.q9m3.com/health";
-  const runUrl = env.RUN_URL || "";
   const parsePositiveInt = (value, fallback) => {
     const parsed = Number.parseInt(value || "", 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
   };
 
-  const result = await probeHealth({
-    url: probeUrl,
-    runUrl,
+  const result = await probeProductionHealth({
+    httpUrl: env.PROBE_URL || "https://cdt.q9m3.com/health",
+    cronUrl: env.CRON_PROBE_URL || "https://cdt.q9m3.com/api/monitor/cron",
+    monitorToken: env.MONITOR_READ_TOKEN,
+    runUrl: env.RUN_URL || "",
+    fetchImpl: options.fetchImpl,
+    now: options.now,
+    delay: options.delay,
     timeoutMs: parsePositiveInt(env.PROBE_TIMEOUT_MS, 10_000),
     maxAttempts: parsePositiveInt(env.PROBE_MAX_ATTEMPTS, 3),
     backoffMs: parsePositiveInt(env.PROBE_BACKOFF_MS, 500),
