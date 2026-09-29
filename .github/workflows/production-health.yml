@@ -1,4 +1,4 @@
-name: Production HTTP health
+name: Production health
 
 on:
   schedule:
@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   probe:
-    name: Probe production HTTP health
+    name: Probe production HTTP and Cron health
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -28,11 +28,13 @@ jobs:
         with:
           node-version: 22
 
-      - name: Probe HTTP health
+      - name: Probe HTTP and Cron health
         id: probe
         run: node scripts/production-health/run-probe.mjs
         env:
           PROBE_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://cdt.q9m3.com/health' }}
+          CRON_PROBE_URL: ${{ vars.PRODUCTION_CRON_MONITOR_URL || 'https://cdt.q9m3.com/api/monitor/cron' }}
+          MONITOR_READ_TOKEN: ${{ secrets.MONITOR_READ_TOKEN }}
           PROBE_TIMEOUT_MS: "10000"
           PROBE_MAX_ATTEMPTS: "3"
           PROBE_BACKOFF_MS: "500"

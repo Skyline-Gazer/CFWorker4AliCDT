@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildIncidentBody,
+  cronIncidentTitle,
   incidentTitle,
+  syncCronIncident,
   syncIncident,
+  syncIncidents,
   type GhRunner,
 } from "../../scripts/production-health/incident.mjs";
 import type { ProbeResult } from "../../scripts/production-health/probe.mjs";
@@ -15,7 +18,12 @@ const failedProbe: ProbeResult = {
   ok: false,
   failure_reason: "Unexpected HTTP status 500",
   probe_url: "https://cdt.q9m3.com/health",
+  http_ok: false,
   cron_health: "UNKNOWN",
+  cron_ok: false,
+  cron_telemetry_available: false,
+  cron_failure_reason: "MONITOR_TOKEN_MISSING",
+  cron_probe_url: "https://cdt.q9m3.com/api/monitor/cron",
   attempts: 3,
   expected_status: 200,
   expected_body_status: "ok",
@@ -88,7 +96,8 @@ describe("production health incident handling", () => {
       expect(jsonBody).not.toContain(secret);
     }
     expect(headerBody).toContain("[REDACTED]");
-    expect(headerBody).toContain("Cron health: UNKNOWN");
+    expect(headerBody).toContain("HTTP health: FAILED");
+    expect(headerBody).not.toContain("Cron health:");
   });
 
   it("closes the matching open incident after HTTP health recovers", async () => {
@@ -117,5 +126,114 @@ describe("production health incident handling", () => {
     expect(
       calls.some((args) => args[0] === "issue" && args[1] === "close" && args[2] === "136"),
     ).toBe(true);
+  });
+
+  it("uses a separate Cron incident title and deduplicates repeated failures", async () => {
+    expect(cronIncidentTitle(failedProbe)).toBe("[production-cron] cdt.q9m3.com");
+
+    const calls: string[][] = [];
+    let openIssue: { number: number; title: string } | null = null;
+    const createdTitles: string[] = [];
+    const gh: GhRunner = (args) => {
+      calls.push([...args]);
+      if (args[0] === "issue" && args[1] === "list") {
+        return Promise.resolve(JSON.stringify(openIssue === null ? [] : [openIssue]));
+      }
+      if (args[0] === "issue" && args[1] === "create") {
+        const title = args[args.indexOf("--title") + 1] ?? "";
+        openIssue = { number: 138, title };
+        createdTitles.push(title);
+      }
+      return Promise.resolve("");
+    };
+
+    expect(await syncCronIncident(failedProbe, gh)).toEqual({
+      action: "created",
+      issueNumber: null,
+    });
+    expect(await syncCronIncident(failedProbe, gh)).toEqual({
+      action: "updated",
+      issueNumber: 138,
+    });
+    expect(createdTitles).toEqual(["[production-cron] cdt.q9m3.com"]);
+    expect(calls.some((args) => args[0] === "issue" && args[1] === "comment")).toBe(true);
+  });
+
+  it("creates only the Cron incident when HTTP is healthy and Cron is unhealthy", async () => {
+    const createdTitles: string[] = [];
+    const gh: GhRunner = (args) => {
+      if (args[0] === "issue" && args[1] === "list") return Promise.resolve("[]");
+      if (args[0] === "issue" && args[1] === "create") {
+        createdTitles.push(args[args.indexOf("--title") + 1] ?? "");
+      }
+      return Promise.resolve("");
+    };
+
+    await syncIncidents({ ...failedProbe, ok: true, http_ok: true, cron_ok: false }, gh);
+
+    expect(createdTitles).toEqual(["[production-cron] cdt.q9m3.com"]);
+  });
+
+  it("creates only the HTTP incident when HTTP is unhealthy and Cron is healthy", async () => {
+    const createdTitles: string[] = [];
+    const gh: GhRunner = (args) => {
+      if (args[0] === "issue" && args[1] === "list") return Promise.resolve("[]");
+      if (args[0] === "issue" && args[1] === "create") {
+        createdTitles.push(args[args.indexOf("--title") + 1] ?? "");
+      }
+      return Promise.resolve("");
+    };
+
+    await syncIncidents({ ...failedProbe, ok: false, cron_ok: true }, gh);
+
+    expect(createdTitles).toEqual(["[production-health] cdt.q9m3.com"]);
+  });
+
+  it("HTTP recovery leaves an open Cron incident untouched", async () => {
+    const calls: string[][] = [];
+    const openIssues = [
+      { number: 136, title: "[production-health] cdt.q9m3.com" },
+      { number: 138, title: "[production-cron] cdt.q9m3.com" },
+    ];
+    const gh: GhRunner = (args) => {
+      calls.push([...args]);
+      if (args[0] === "issue" && args[1] === "list") {
+        const query = args[args.indexOf("--search") + 1] ?? "";
+        return Promise.resolve(
+          JSON.stringify(openIssues.filter((issue) => query.includes(issue.title))),
+        );
+      }
+      return Promise.resolve("");
+    };
+
+    await syncIncidents({ ...failedProbe, ok: true, http_ok: true, cron_ok: false }, gh);
+
+    expect(calls.some((args) => args[1] === "close" && args[2] === "136")).toBe(true);
+    expect(calls.some((args) => args[1] === "close" && args[2] === "138")).toBe(false);
+    expect(calls.some((args) => args[1] === "comment" && args[2] === "138")).toBe(true);
+  });
+
+  it("Cron recovery closes only the Cron incident", async () => {
+    const calls: string[][] = [];
+    const openIssues = [
+      { number: 136, title: "[production-health] cdt.q9m3.com" },
+      { number: 138, title: "[production-cron] cdt.q9m3.com" },
+    ];
+    const gh: GhRunner = (args) => {
+      calls.push([...args]);
+      if (args[0] === "issue" && args[1] === "list") {
+        const query = args[args.indexOf("--search") + 1] ?? "";
+        return Promise.resolve(
+          JSON.stringify(openIssues.filter((issue) => query.includes(issue.title))),
+        );
+      }
+      return Promise.resolve("");
+    };
+
+    await syncIncidents({ ...failedProbe, ok: false, cron_ok: true }, gh);
+
+    expect(calls.some((args) => args[1] === "close" && args[2] === "138")).toBe(true);
+    expect(calls.some((args) => args[1] === "close" && args[2] === "136")).toBe(false);
+    expect(calls.some((args) => args[1] === "comment" && args[2] === "136")).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
-const INCIDENT_PREFIX = "[production-health]";
+const HTTP_INCIDENT_PREFIX = "[production-health]";
+const CRON_INCIDENT_PREFIX = "[production-cron]";
 
 function redactSensitiveText(value) {
   return String(value ?? "")
@@ -17,9 +18,10 @@ function redactSensitiveText(value) {
     .slice(0, 400);
 }
 
-function incidentHost(result) {
+function incidentHost(result, component) {
   try {
-    return new URL(result.probe_url).hostname.toLowerCase();
+    const candidate = component === "cron" ? result.cron_probe_url : result.probe_url;
+    return new URL(candidate).hostname.toLowerCase();
   } catch {
     return "unknown-host";
   }
@@ -36,42 +38,79 @@ function safeRunUrl(result) {
   }
 }
 
-function evidenceLines(result) {
-  const lines = [
-    `- Timestamp (UTC): ${redactSensitiveText(result.timestamp) || "unknown"}`,
-    `- HTTP status: ${Number.isInteger(result.http_status) ? result.http_status : "no response"}`,
-    `- Latency: ${Number.isFinite(result.latency_ms) ? `${result.latency_ms} ms` : "unavailable"}`,
-    `- Attempts: ${Number.isInteger(result.attempts) ? result.attempts : "unknown"}`,
-    "- Cron health: UNKNOWN",
-  ];
+function evidenceLines(result, component) {
+  const lines = [`- Timestamp (UTC): ${redactSensitiveText(result.timestamp) || "unknown"}`];
+
+  if (component === "http") {
+    lines.push(
+      `- HTTP status: ${Number.isInteger(result.http_status) ? result.http_status : "no response"}`,
+      `- Latency: ${Number.isFinite(result.latency_ms) ? `${result.latency_ms} ms` : "unavailable"}`,
+      `- Attempts: ${Number.isInteger(result.attempts) ? result.attempts : "unknown"}`,
+      "- HTTP health: FAILED",
+    );
+  } else {
+    lines.push(
+      `- Cron health: ${["HEALTHY", "DEGRADED", "UNHEALTHY", "UNKNOWN"].includes(result.cron_health) ? result.cron_health : "UNKNOWN"}`,
+      `- Telemetry available: ${result.cron_telemetry_available === true ? "yes" : "no"}`,
+      `- Probe attempts: ${Number.isInteger(result.cron_probe_attempts) ? result.cron_probe_attempts : "unknown"}`,
+      `- Recent successes: ${Number.isInteger(result.cron_recent_success_count) ? result.cron_recent_success_count : "unknown"}`,
+      `- Recent failures: ${Number.isInteger(result.cron_recent_failure_count) ? result.cron_recent_failure_count : "unknown"}`,
+      `- Failure classification: ${redactSensitiveText(result.cron_failure_classification) || "none"}`,
+    );
+  }
+
   const runUrl = safeRunUrl(result);
   if (runUrl) lines.push(`- Actions run: ${runUrl}`);
   return lines;
 }
 
 export function incidentTitle(result) {
-  return `${INCIDENT_PREFIX} ${incidentHost(result)}`;
+  return `${HTTP_INCIDENT_PREFIX} ${incidentHost(result, "http")}`;
 }
 
-export function buildIncidentBody(result) {
-  const lines = [
+export function cronIncidentTitle(result) {
+  return `${CRON_INCIDENT_PREFIX} ${incidentHost(result, "cron")}`;
+}
+
+export function buildIncidentBody(result, component = "http") {
+  if (component === "cron") {
+    return [
+      "The production Cron telemetry probe is not healthy or is unavailable.",
+      "",
+      ...evidenceLines(result, "cron"),
+      `- Cron result: ${redactSensitiveText(result.cron_failure_reason) || "telemetry is not HEALTHY"}`,
+      "",
+      "This records read-only Cron history telemetry. It does not authorize or perform ECS control.",
+    ].join("\n");
+  }
+
+  return [
     "The production HTTP health probe failed after its configured retries.",
     "",
-    ...evidenceLines(result),
+    ...evidenceLines(result, "http"),
     `- Failure reason: ${redactSensitiveText(result.failure_reason) || "unspecified probe failure"}`,
     "",
     "This records HTTP `/health` evidence only. It does not report Cron or ECS health.",
-  ];
-  return lines.join("\n");
+  ].join("\n");
 }
 
-export function buildRecoveryComment(result) {
+export function buildRecoveryComment(result, component = "http") {
+  if (component === "cron") {
+    return [
+      "Production Cron telemetry has recovered.",
+      "",
+      ...evidenceLines(result, "cron"),
+      "",
+      "This records read-only Cron history telemetry. HTTP and ECS health are separate signals.",
+    ].join("\n");
+  }
+
   return [
     "Production HTTP health has recovered.",
     "",
-    ...evidenceLines({ ...result, failure_reason: null }),
+    ...evidenceLines(result, "http"),
     "",
-    "This records HTTP `/health` evidence only. Cron health remains UNKNOWN; ECS health is not measured.",
+    "This records HTTP `/health` evidence only. Cron and ECS health are separate signals.",
   ].join("\n");
 }
 
@@ -111,15 +150,14 @@ async function findOpenIncidents(title, gh) {
     .sort((left, right) => left.number - right.number);
 }
 
-/** Sync exactly one monitor's incident using an injectable, argv-based gh runner. */
-export async function syncIncident(result, gh) {
-  if (typeof gh !== "function") throw new TypeError("A GitHub CLI runner is required");
-
-  const title = incidentTitle(result);
+async function syncComponentIncident(result, gh, component) {
+  const isHttp = component === "http";
+  const title = isHttp ? incidentTitle(result) : cronIncidentTitle(result);
+  const failed = isHttp ? result.ok !== true : result.cron_ok !== true;
   const matching = await findOpenIncidents(title, gh);
 
-  if (!result.ok) {
-    const body = buildIncidentBody(result);
+  if (failed) {
+    const body = buildIncidentBody(result, component);
     const primary = matching[0];
     if (!primary) {
       await gh(["issue", "create", "--title", title, "--body", body]);
@@ -133,20 +171,41 @@ export async function syncIncident(result, gh) {
         "close",
         String(duplicate.number),
         "--comment",
-        "Duplicate production health incident consolidated into the oldest open issue.",
+        `Duplicate ${component === "http" ? "production HTTP health" : "production Cron telemetry"} incident consolidated into the oldest open issue.`,
       ]);
     }
     return { action: "updated", issueNumber: primary.number };
   }
 
-  const recovery = buildRecoveryComment(result);
+  const recovery = buildRecoveryComment(result, component);
   for (const issue of matching) {
-    await gh(["issue", "close", String(issue.number), "--comment", recovery]);
+    await gh(["issue", "comment", String(issue.number), "--body", recovery]);
+    await gh(["issue", "close", String(issue.number)]);
   }
   return {
     action: matching.length > 0 ? "closed" : "none",
     issueNumber: matching[0]?.number ?? null,
   };
+}
+
+/** Sync the HTTP `/health` incident only. */
+export async function syncIncident(result, gh) {
+  if (typeof gh !== "function") throw new TypeError("A GitHub CLI runner is required");
+  return syncComponentIncident(result, gh, "http");
+}
+
+/** Sync the Cron monitor incident only. */
+export async function syncCronIncident(result, gh) {
+  if (typeof gh !== "function") throw new TypeError("A GitHub CLI runner is required");
+  if (typeof result.cron_ok !== "boolean") return { action: "none", issueNumber: null };
+  return syncComponentIncident(result, gh, "cron");
+}
+
+/** Keep both incident lifecycles independent and tied to exact, separate titles. */
+export async function syncIncidents(result, gh) {
+  const http = await syncIncident(result, gh);
+  const cron = await syncCronIncident(result, gh);
+  return { http, cron };
 }
 
 export { redactSensitiveText };

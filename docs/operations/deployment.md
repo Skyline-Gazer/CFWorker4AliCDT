@@ -3,9 +3,10 @@
 ## Production HTTP health monitoring
 
 The scheduled, read-only public HTTP health probe and its incident behavior are
-documented in [Production HTTP health monitoring](production-health.md). Its
-`/health` result does not establish Cron or ECS health; Cron health remains
-`UNKNOWN` until secure telemetry is separately authorized.
+documented in [Production health monitoring](production-health.md). Its
+`/health` result does not establish Cron or ECS health. The read-only Cron
+endpoint and its owner steps are covered in the [Cron monitor owner authorization
+packet](../release/cron-monitor-owner-authorization.md).
 
 Deployment is **manual and owner-gated**. No CI job deploys, and no scheduled ECS
 mutation occurs without explicit owner authorization.
@@ -73,6 +74,7 @@ Three distinct classes exist, and conflating them causes real deployment defects
 | **Application runtime variables** | Generated Wrangler `vars` | GitHub **Variables** | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB` |
 | **Deployment-only values** | The resolver / workflow invocation | Repository Variables, `production` Environment Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
 | **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / Cloudflare secret UI | `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ADMIN_TOKEN` |
+| **Optional Cron monitor Worker Secret** | Cloudflare Worker Secret | `wrangler secret put` / Cloudflare secret UI | `MONITOR_READ_TOKEN` (owner-installed; not required by deploy validation) |
 
 The difference that matters: **application runtime variables configure how the
 Worker behaves and are not credentials**, so they belong in GitHub Variables, not

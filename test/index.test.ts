@@ -590,6 +590,63 @@ describe("fetch — HTTP surface (SPEC §8.1)", () => {
 });
 
 describe("fetch — the fetch handler never runs a monitor (SPEC §8, anti-requirement)", () => {
+  it("wires the dedicated token to a bounded D1-only Cron monitor read", async () => {
+    const sqlCalls: { sql: string; params: readonly unknown[] }[] = [];
+    const trafficDb = {
+      prepare: (sql: string) => ({
+        bind: (...params: unknown[]) => ({
+          all: () => {
+            sqlCalls.push({ sql, params });
+            return Promise.resolve({
+              results: [
+                {
+                  checked_at: new Date().toISOString(),
+                  status: "success",
+                  error_stage: null,
+                },
+              ],
+            });
+          },
+        }),
+      }),
+    };
+    const response = await worker.fetch(
+      new Request("https://w.test/api/monitor/cron", {
+        headers: { authorization: "Bearer monitor-fixture-token" },
+      }),
+      env({
+        MONITOR_READ_TOKEN: "monitor-fixture-token",
+        TRAFFIC_DB: trafficDb as unknown as D1Database,
+      }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      cron_health: "HEALTHY",
+      telemetry_available: true,
+    });
+    expect(sqlCalls).toHaveLength(1);
+    expect(sqlCalls[0]?.sql).toContain("SELECT checked_at, status, error_stage");
+    expect(sqlCalls[0]?.sql).toContain("LIMIT ?");
+    expect(sqlCalls[0]?.params).toEqual([200]);
+  });
+
+  it("denies the monitor route when its dedicated token is unset even if ADMIN_TOKEN exists", async () => {
+    const response = await worker.fetch(
+      new Request("https://w.test/api/monitor/cron", {
+        headers: { authorization: `Bearer ${env().ADMIN_TOKEN}` },
+      }),
+      env({ MONITOR_READ_TOKEN: undefined }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe(JSON.stringify({ error: "Unauthorized" }));
+  });
+
   it("makes no Alibaba call for any HTTP route", async () => {
     // An unauthenticated fetch handler running the whole monitor is the
     // anti-requirement this project exists to avoid.
