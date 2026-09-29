@@ -179,8 +179,12 @@ describe("deployment trust boundary", () => {
     const doc = readFileSync(DEPLOYMENT_DOC, "utf8");
     expect(doc).toContain("**required reviewers enabled**");
     expect(doc).toContain("deployment branches/tags **restricted to `main` only**");
-    expect(doc).toContain("| `CLOUDFLARE_API_TOKEN` | Secret | **`production` Environment** |");
-    expect(doc).toContain("| `CLOUDFLARE_ACCOUNT_ID` | Secret | **`production` Environment** |");
+    expect(doc).toMatch(
+      /\|\s*`CLOUDFLARE_API_TOKEN`\s*\|\s*Secret\s*\|\s*\*\*`production` Environment\*\*\s*\|/,
+    );
+    expect(doc).toMatch(
+      /\|\s*`CLOUDFLARE_ACCOUNT_ID`\s*\|\s*Secret\s*\|\s*\*\*`production` Environment\*\*\s*\|/,
+    );
     expect(doc).toContain("Keep `REGION_ID`");
     expect(doc).toContain("`D1_DATABASE_ID`");
     expect(doc).toContain("ref guard is supplementary");

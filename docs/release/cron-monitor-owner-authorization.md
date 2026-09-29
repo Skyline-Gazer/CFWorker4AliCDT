@@ -1,5 +1,8 @@
 # Cron monitor owner authorization packet
 
+> Historical authorization packet. Current monitor-token installation and probe procedures are in [configuration](../operations/configuration.md) and [monitoring](../operations/monitoring.md).
+
+
 ## Status
 
 The read-only Cron monitor is implemented in code, but is **not operational**

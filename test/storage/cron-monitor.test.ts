@@ -76,6 +76,24 @@ describe("Cron history monitoring projection", () => {
     expect(result.failure_classification).toBe("CDT_QUERY");
   });
 
+  it("degrades a fresh latest success when an unknown-status row remains in lookback", () => {
+    const result = summarizeCronHistory(
+      [row(5, "success"), row(12, "weird-status"), row(20, "success")],
+      NOW,
+    );
+
+    expect(result.cron_health).toBe("DEGRADED");
+    expect(result.latest_status).toBe("success");
+    expect(result.recent_failure_count).toBe(0);
+  });
+
+  it("degrades when the latest usable row itself has an unknown status", () => {
+    const result = summarizeCronHistory([row(4, "pending-like"), row(15, "success")], NOW);
+
+    expect(result.cron_health).toBe("DEGRADED");
+    expect(result.latest_status).toBe("unknown");
+  });
+
   it("returns UNKNOWN with telemetry available for empty history", () => {
     const result = summarizeCronHistory([], NOW);
 

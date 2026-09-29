@@ -1,5 +1,8 @@
 # Assumptions and verification register
 
+> Historical verification and assumption record. Its dated evidence is preserved; verify present production state in Cloudflare and consult current operator guides before acting.
+
+
 Several load-bearing facts about this system **cannot be verified without a live
 deployment**. This register records every such claim as an **assumption**, names
 the concrete observation that would verify it, and states what breaks if it is

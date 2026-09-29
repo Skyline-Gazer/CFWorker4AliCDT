@@ -157,13 +157,20 @@ export function summarizeCronHistory(
   const recent = usable.filter((row) => observationTime - row.timestamp <= lookbackMs);
   const recentSuccessCount = recent.filter((row) => row.status === "success").length;
   const recentFailures = recent.filter((row) => row.status === "error");
+  const recentUnknown = recent.filter((row) => row.status === "unknown");
   const lastSuccess = usable.find((row) => row.status === "success");
   const latestAge = observationTime - latest.timestamp;
   const successAge =
     lastSuccess === undefined ? Number.POSITIVE_INFINITY : observationTime - lastSuccess.timestamp;
 
   let health: CronHealth;
-  if (latest.status === "success" && latestAge <= freshnessMs && recentFailures.length === 0) {
+  // HEALTHY requires a fresh latest success with no error or unknown rows in lookback.
+  if (
+    latest.status === "success" &&
+    latestAge <= freshnessMs &&
+    recentFailures.length === 0 &&
+    recentUnknown.length === 0
+  ) {
     health = "HEALTHY";
   } else if (successAge > freshnessMs * 2) {
     health = "UNHEALTHY";

@@ -600,7 +600,9 @@ describe("fetch — the fetch handler never runs a monitor (SPEC §8, anti-requi
             return Promise.resolve({
               results: [
                 {
-                  checked_at: new Date().toISOString(),
+                  // Keep the fixture strictly in the past so parseTimestamp cannot
+                  // reject it when observation time lands on the same millisecond.
+                  checked_at: new Date(Date.now() - 60_000).toISOString(),
                   status: "success",
                   error_stage: null,
                 },

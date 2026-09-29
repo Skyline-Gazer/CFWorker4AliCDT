@@ -1,5 +1,8 @@
 # CFWorker4AliCDT — Project Plan
 
+> Historical planning record. Scope and production-state references are from its authoring period; use current code and operator guides for present behavior.
+
+
 > Status: **REVISION 2 — APPROVED BY OWNER (2026-09-20), incorporating the Web/D1
 > architecture revision.** This document supersedes Revision 1 (the initial planning
 > PR [#1](https://github.com/Skyline-Gazer/CFWorker4AliCDT/pull/1)).

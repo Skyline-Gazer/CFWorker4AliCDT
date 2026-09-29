@@ -1,206 +1,82 @@
 # CFWorker4AliCDT
 
-A Cloudflare Worker that enforces an Alibaba Cloud CDT traffic threshold by
-starting and stopping **one** ECS instance. It is control-stateless: D1 stores
-monitoring history, but no control decision depends on that history.
+CFWorker4AliCDT is a Cloudflare Worker that checks Alibaba Cloud CDT internet traffic and, on its scheduled path, may start or stop one configured ECS instance when a threshold decision calls for it. D1 stores monitoring history; it does not decide control behavior.
 
-> **Production state:** the last production RELEASE is
-> `106f4d214a883ac9bfdf0798110f845092fbe971`. Current `main` at
-> `ad671bc1f186faf78c3f063858eedc72ee5bb1fe` is held and has not been deployed.
-> PRE-FLIGHT is for first deploys only; normal existing-Worker re-deployments use
-> the owner-gated UPDATE path documented below and in
-> [`docs/operations/deployment.md`](docs/operations/deployment.md).
+## Current product
 
-## P7 Web Console donor follow-up
+A Cron Trigger runs the control pipeline every 10 minutes:
 
-Corrective donor UI integration is tracked under Epic #77. The historical
-server-rendered P7 acceptance remains in place: Issue #39 remains CLOSED and
-Issue #47 remains Done. Refs #78 #80 cover donor provenance and the API
-compatibility inventory; they do not revise that acceptance as a failure. The
-compatibility matrix is in
-[`docs/planning/p7-donor-api-compatibility.md`](docs/planning/p7-donor-api-compatibility.md),
-and provenance is recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-Current `main` includes the static donor UI and authenticated read-only status,
-refresh, and history adapters; the donor control action remains a non-mutating
-placeholder. Refs #105 covers the existing-Worker update path and does not
-authorize a production deployment.
+1. Read CDT traffic and describe the configured ECS instance.
+2. Decide from validated traffic, the configured threshold, and the observed instance state.
+3. Make at most one StartInstance or StopInstance call when the decision requires it.
+4. Attempt the configured webhook notification, if enabled, and record the run in D1.
 
-## Why this exists
+If traffic or ECS state cannot be established, the pipeline fails closed and does not mutate the instance. An unavailable or invalid traffic value is never treated as zero. HTTP handlers do not call this scheduled pipeline.
 
-An ECS instance relays traffic billed under Cloudflare Data Transfer (CDT). When
-monthly internet traffic reaches an allowance, continued operation risks unexpected
-spend. Managing that by hand fails in both directions: traffic can cross the
-threshold while nobody is watching, or an operator can misread a dashboard and
-leave the instance in the wrong state.
+Traffic values labeled GB use a 1024³ byte divisor to match the CDT console convention.
 
-Existing community scripts solve the happy path but share one specific defect: when
-the traffic response is missing or malformed, they coerce it to `0`, conclude "under
-threshold", and leave the instance running. They also tend to expose unauthenticated
-control endpoints and issue unsolicited reboots. Those behaviours are recorded here
-as **anti-requirements** so they are not reintroduced.
+## Safety boundaries
 
-## What it does
+- The scheduled Cron pipeline is the only ECS mutation authority.
+- POST /api/query performs live reads and returns the decision the scheduled logic would make. It has no StartInstance or StopInstance dependency.
+- D1 is observation history. A D1 failure does not supply a control decision.
+- GET /health is public liveness only. It does not prove Cron or ECS health.
+- GET /api/monitor/cron reads sanitized D1 telemetry and requires its own MONITOR_READ_TOKEN Bearer credential. ADMIN_TOKEN does not authorize it.
+- Manual donor notification tests can send external messages only when explicitly enabled and configured. They never control ECS.
 
-Every 10 minutes, on a Cron Trigger:
+See [security invariants](docs/security/invariants.md) for the security boundaries and [the API guide](docs/operations/api.md) for every route and donor action.
 
-1. Query CDT internet traffic.
-2. Describe the managed instance.
-3. Decide the desired state from a threshold rule.
-4. Perform **at most one** mutation, and only if the desired state differs from the
-   observed one.
-5. If the optional webhook is configured, send one report for the run.
-6. Record the outcome in D1 as monitoring history, whether or not a webhook is configured.
+## Repository, GitHub Release, and production are separate
 
-## The central invariant
+Repository HEAD can move as commits merge. A GitHub Release is a tag and notes for a source revision; creating it does not dispatch release.yml or deploy a Cloudflare Worker. Production runs whichever Worker version was last deployed through the owner-gated Cloudflare workflow.
 
-> **Inability to establish the traffic value is never evidence that the traffic
-> value is zero.**
-
-In plain language: **if traffic cannot be determined, nothing is started or stopped.**
-The instance is left exactly as found. The error is recorded in D1 and sent to the
-webhook when that optional notification endpoint is configured.
-
-This is deliberately asymmetric. A false abort costs one monitoring interval. A
-false "under threshold" costs money and cannot be undone retroactively. Everything
-below follows from that asymmetry.
-
-## Fail-closed behaviour, concretely
-
-Every one of these aborts the run **before any ECS call**:
-
-- the traffic response is missing, empty, malformed, or not an array
-- a traffic value is absent, `null`, `""`, non-numeric, `NaN`, infinite, or negative
-- the API returns an error code, or the transport fails
-- the instance is absent from the describe response
-- the observed instance state is transitional or unrecognised in a direction with no
-  safe transition
-
-An empty `TrafficDetails` array is treated as **invalid, not as zero**. Zero traffic
-and unavailable traffic are different facts, and only one of them is safe to infer.
-
-## Safety posture
-
-- **No public control endpoint.** The Cron Trigger is the only path that can start or
-  stop an instance. There is no route that can reboot, start, or stop anything.
-- **One instance.** No multi-instance or multi-region management.
-- **At most one mutation per run**, enforced structurally rather than by convention.
-- **No force-stop.** `ForceStop` is `false` and not configurable; force-stopping risks
-  filesystem corruption.
-- **Secrets never appear** in logs, webhook payloads, D1 rows, rendered HTML, or
-  error strings. Redaction is a single boundary, not a per-call-site habit.
-- **The dashboard and API are authenticated**; the only public route is `GET /health`,
-  which performs no privileged work.
-
-## Deployment
-
-The initial deployment is **two-stage** by design:
-
-```
-PRE-FLIGHT  →  first deploy, Cron explicitly disabled (triggers.crons = [])
-            →  Version URL
-            →  live READ-ONLY verification of R2/R3/R4 via POST /api/query
-            →  owner confirms
-RELEASE     →  separate, approved dispatch: stable HTTP endpoint + Cron */10 * * * *
-```
-
-Normal production re-deployments use `.github/workflows/update.yml`. UPDATE requires
-the owner to confirm the Worker already exists with Cron live, carries Cron at
-`*/10 * * * *`, preserves the explicitly selected HTTP exposure and required Worker
-Secret names, and applies pending D1 migrations before deploying code.
-
-**Never use PRE-FLIGHT against the live Cron Worker.** Its explicit empty Cron array
-removes every Cron Trigger. PRE-FLIGHT is for a new Worker only.
-
-The split exists because enabling Cron before the traffic unit has been checked
-would let the system act on a _valid but incorrect_ threshold comparison — the one
-failure the fail-closed design cannot detect. `wrangler versions upload` cannot be
-used for the first upload of a new Worker, so the bootstrap is a real `wrangler
-deploy` whose config declares no Cron Trigger.
-
-HTTP exposure is an explicit owner choice (`workers_dev` or `custom_domain`), with
-no default; the committed config exposes no stable endpoint. Full procedure:
-[`docs/operations/deployment.md`](docs/operations/deployment.md).
-
-Required production Worker secrets and optional notification secrets (set via
-`wrangler secret put`; never committed):
-
-| Secret                     | Requirement                    | Notes                                                                                              |
-| -------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `ALIYUN_ACCESS_KEY_ID`     | Required                       | From the least-privilege RAM user.                                                                 |
-| `ALIYUN_ACCESS_KEY_SECRET` | Required                       | Its paired secret.                                                                                 |
-| `ADMIN_TOKEN`              | Required by RELEASE and UPDATE | Dashboard and API credential. Absent ⇒ every protected route denies.                               |
-| `WEBHOOK_URL`              | Optional                       | If set, must be an absolute `https://` URL and enables one notification attempt per scheduled run. |
-| `WEBHOOK_TOKEN`            | Optional with URL              | Sent as `Authorization: Bearer <token>`. A token without `WEBHOOK_URL` is a config error.          |
-
-The Worker runs scheduled control and records history without webhook secrets. The
-webhook is observational when enabled; its failures cannot affect ECS control.
-
-Seven plain variables, as three distinct classes — see
-[`docs/operations/deployment.md`](docs/operations/deployment.md) §1a:
-
-- **Required application variables (repository variables, not secrets):**
-  `REGION_ID`, `ECS_INSTANCE_ID`. The resolver refuses to generate a deployment
-  config without them, because a deploy that omitted them would succeed and then
-  fail `loadConfig()` on every request.
-- **Optional application overrides (repository variables):** `TRAFFIC_THRESHOLD_GB`
-  (`180`), `CDT_ENDPOINT` (`cdt.aliyuncs.com`), `BUSINESS_REGION_ID` (unset),
-  `SIGNATURE_VERSION` (`v3`), `STOPPED_MODE` (`KeepCharging`). Unset, the committed
-  `wrangler.jsonc` default is preserved.
-
-| Variable               | Default            | Notes                                                   |
-| ---------------------- | ------------------ | ------------------------------------------------------- |
-| `REGION_ID`            | **required**       | ECS region.                                             |
-| `ECS_INSTANCE_ID`      | **required**       | The single managed instance.                            |
-| `TRAFFIC_THRESHOLD_GB` | `180`              | Console-aligned GB, calculated with a `1024^3` divisor. |
-| `CDT_ENDPOINT`         | `cdt.aliyuncs.com` | Configurable because the hostname is unverified.        |
-| `BUSINESS_REGION_ID`   | unset              | When set, applied as a server-side CDT filter.          |
-| `SIGNATURE_VERSION`    | `v3`               | `v2` or `v3`.                                           |
-| `STOPPED_MODE`         | `KeepCharging`     | See the deployment doc before changing.                 |
-
-Deployment-only values (`D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`,
-`WORKER_CUSTOM_DOMAIN`) are a separate class and are not Worker runtime variables.
-
-## Traffic GB matches the CDT console
-
-The public traffic and threshold labels remain `GB` to align with Alibaba CDT.
-Convert raw Traffic bytes as `trafficGB = trafficBytes / 1024^3` (divisor
-`1,073,741,824`), not SI decimal `10^9`. Owner-provided live evidence: `27,858,630`
-bytes is approximately `0.02594537 GB` by this calculation, matching the CDT
-console's `0.02595 GB` display. The default `TRAFFIC_THRESHOLD_GB` remains `180`;
-the threshold is not adjusted to compensate for this conversion.
+Therefore repo HEAD, the GitHub Release tag, and the production Worker may identify different revisions. The README avoids fixed production SHAs because they become stale. Use the dated [v0.1.0 governance evidence snapshot](docs/release/v0.1.0-documentation-governance.md) as the recorded production reference, then verify the live Worker version in Cloudflare and its last UPDATE run before operational decisions.
 
 ## HTTP surface
 
-| Method | Path           | Auth     | Behaviour                                                                |
-| ------ | -------------- | -------- | ------------------------------------------------------------------------ |
-| `GET`  | `/health`      | Public   | Liveness only. No Alibaba call, no D1 read, no configuration disclosed.  |
-| `GET`  | `/`            | Required | Server-rendered dashboard.                                               |
-| `GET`  | `/api/history` | Required | Bounded monitoring history, newest first.                                |
-| `POST` | `/api/query`   | Required | Live **read-only** query: what the system sees and what it would decide. |
+Protected routes use HTTP Basic authentication: username ADMIN_USER (default admin) and password ADMIN_TOKEN.
 
-Every other path returns `404`; a known path with the wrong method returns `405`.
+| Method     | Path                 | Authentication            | Behavior                                                                                                       |
+| ---------- | -------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| GET        | /health              | Public                    | Static liveness JSON only.                                                                                     |
+| GET        | /                    | Basic                     | Authenticated dashboard HTML.                                                                                  |
+| GET        | /api/history         | Basic                     | Bounded D1 run history, newest first.                                                                          |
+| POST       | /api/query           | Basic                     | Live read-only CDT/ECS query and decision. Always reports mutation: false.                                     |
+| GET        | /api/monitor/cron    | Bearer MONITOR_READ_TOKEN | Sanitized, bounded Cron telemetry from D1; no ECS read or mutation.                                            |
+| GET / HEAD | Static bundle assets | Public                    | Only the fixed CSS, JavaScript bundles, icon, and input stylesheet used to render the authenticated dashboard. |
 
-`POST /api/query` deliberately stops one step before acting. It is read-only **by
-construction** — its dependencies expose no mutation seam at all — so it cannot
-become a second mutation authority.
+With valid authentication, wrong methods on known routes return 405 and unknown paths return 404. Protected namespaces authenticate before route lookup, so an unauthenticated request there can receive 401 first. The monitor endpoint never accepts query-string credentials. Its full response and status behavior is in [the API guide](docs/operations/api.md).
 
-## Documentation
+The donor UI uses /?action=... compatibility responses. Some actions map to read-only data, notification sends are gated, and unsupported actions return honest 501 responses with mutation: false. This is not full donor backend parity; see the [donor action table](docs/operations/api.md#donor-actions).
 
-| Document                                                                             | Contents                                                               |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| [`docs/planning/project-plan.md`](docs/planning/project-plan.md)                     | Approved plan: scope, risks, phases.                                   |
-| [`docs/planning/project-spec.md`](docs/planning/project-spec.md)                     | Normative behaviour and acceptance criteria.                           |
-| [`docs/architecture/overview.md`](docs/architecture/overview.md)                     | Component boundaries and the run pipeline.                             |
-| [`docs/security/ram-policy.md`](docs/security/ram-policy.md)                         | The least-privilege policy and credential procedure.                   |
-| [`docs/operations/deployment.md`](docs/operations/deployment.md)                     | Deployment, operations, `StopCharging` implications, plan requirement. |
-| [`docs/operations/assumptions-register.md`](docs/operations/assumptions-register.md) | Every unverified claim, how to verify it, and the impact if wrong.     |
+## Deferred owner decisions
+
+Issues [#90–#93](docs/release/p7-owner-gates-90-93.md) remain open and deferred:
+
+- #90: multi-account support.
+- #91: manual Start/Stop controls.
+- #92: daily schedule control.
+- #93: keep-alive behavior.
+
+These features are not active in this Worker. Cron remains the only ECS mutation authority.
+
+## Operator guides
+
+- [Deployment](docs/operations/deployment.md): first deployment, updates, GitHub Release distinction, verification, and monitor token installation.
+- [Configuration](docs/operations/configuration.md): runtime variables, Worker Secrets, GitHub settings, and feature gates.
+- [Usage](docs/operations/usage.md): operator checks for health, console, query, history, and Cron telemetry.
+- [API](docs/operations/api.md): route authentication, responses, status codes, and donor action coverage.
+- [Monitoring](docs/operations/monitoring.md): HTTP and Cron probes, health states, incidents, and limits.
+- [Security invariants](docs/security/invariants.md): fail-closed control, auth boundaries, and secret handling.
+- [RAM policy](docs/security/ram-policy.md): least-privilege Alibaba permissions.
+- [Documentation governance](docs/release/v0.1.0-documentation-governance.md): audited inventory, consistency matrix, and dated production evidence.
+- [Third-party notices](THIRD_PARTY_NOTICES.md): donor provenance and bundled asset licenses.
+
+Historical plans, review packets, and owner decision records remain available under [planning](docs/planning/project-plan.md) and [release](docs/release/p7-owner-gates-90-93.md). They preserve their original context; current behavior is described by code, tests, and the operator guides above.
 
 ## Development
 
-```sh
-npm ci
-npm run validate    # format, lint, typecheck, test, and a deploy dry-run, in CI order
-```
+    npm ci
+    npm run validate
 
-No test performs a live Alibaba Cloud call, and no test requires network access. All
-network I/O is mocked, and CI holds no credentials and performs no deployment.
+npm run validate runs formatting checks, lint, typecheck, tests, and a Wrangler deploy dry-run. The .github/workflows/ci.yml workflow runs offline tests and has no production credentials or deploy step. The lightweight documentation consistency checks run as part of npm test.

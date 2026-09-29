@@ -1,50 +1,30 @@
 # Deployment and operations
 
-## Production HTTP health monitoring
+Deployment is manual and owner-gated. CI does not deploy, and no scheduled ECS mutation is enabled without explicit owner authorization.
 
-The scheduled, read-only public HTTP health probe and its incident behavior are
-documented in [Production health monitoring](production-health.md). Its
-`/health` result does not establish Cron or ECS health. The read-only Cron
-endpoint and its owner steps are covered in the [Cron monitor owner authorization
-packet](../release/cron-monitor-owner-authorization.md).
+> No credential value is printed, echoed, pasted into an issue, written to a log, or committed. Commands either prompt or reference a credential by name. Never put a secret value in argv or shell history.
 
-Deployment is **manual and owner-gated**. No CI job deploys, and no scheduled ECS
-mutation occurs without explicit owner authorization.
+The canonical runtime settings are in [configuration.md](configuration.md). Health probes and incident behavior are in [monitoring.md](monitoring.md). The [governance audit](../release/v0.1.0-documentation-governance.md) records a dated production evidence snapshot; for current state, verify the live Worker version in Cloudflare and inspect its latest UPDATE run.
 
-> **No credential value is ever printed, echoed, pasted into an issue, written to
-> a log, or committed.** Every command below either prompts for a value or
-> references one by name. If you find yourself typing a secret as a command
-> argument, stop — the argument is recorded in shell history.
+## 0. Deployment stages and GitHub Release
 
-## 0. Initial deployment and normal updates
+| Operation      | First deployment                                     | Existing Worker                                             | GitHub Release                                                      |
+| -------------- | ---------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- |
+| PRE-FLIGHT     | Creates the Worker with Cron explicitly disabled.    | Do not use; an empty Cron array removes scheduled triggers. | Not related.                                                        |
+| RELEASE        | First Cron enable after live read-only verification. | Do not use for ordinary updates.                            | The release.yml workflow is manually dispatched, not tag-triggered. |
+| UPDATE         | Not for creating the first Worker.                   | Re-deploys code and preserves Cron at */10 * * * *.         | Not related.                                                        |
+| GitHub Release | A tag and release notes for a source revision.       | Does not deploy or change Cron.                             | Does not invoke release.yml or Cloudflare.                          |
 
-It is worth being explicit about the difference, because conflating them is what
-made the earlier single-stage design unsafe.
+A repository HEAD is the current branch tip. A GitHub Release tag identifies its tagged source revision. The production Worker runs the version last deployed through PRE-FLIGHT, RELEASE, UPDATE, or the separate monitor-token secret workflow. These references can differ. Do not treat a tag or merged commit as proof of a production deploy.
 
-| | **Initial bootstrap** | **Existing-Worker update** |
-| --- | --- | --- |
-| Frequency | Once, for a new Worker | Normal production re-deployments |
-| Cron authority | PRE-FLIGHT disables it; RELEASE enables `*/10 * * * *` after live verification | Preserved at `*/10 * * * *` |
-| HTTP endpoint | Version URL during verification, then explicit owner choice | Existing exposure is explicitly redeclared |
-| Verification | Read-only, live, before first Cron enable | Regression checks, then console and health checks |
-| Workflows | `preflight.yml`, then `release.yml` | `update.yml` |
-| Config | `wrangler.preflight.jsonc`, then `wrangler.deploy.jsonc` | `wrangler.update.jsonc` |
+The first deployment is two owner actions:
 
-The bootstrap is two owner actions, not one:
+    PRE-FLIGHT -> Version URL -> read-only live verification -> owner confirmation
+                                                              |
+                                                              v
+                                                       RELEASE deploy
 
-```
-preflight deploy  →  Version URL  →  read-only live verification  →  owner confirms
-                                                                          │
-                                                                          ▼
-                                                                   release deploy
-                                                          (stable endpoint + Cron)
-```
-
-**PRE-FLIGHT is first-deploy only. Never run it against a Worker with live Cron.**
-Its generated config writes `triggers.crons = []`, which removes every Cron
-Trigger on that Worker. RELEASE is the separate first-Cron-enable action after
-live read-only verification. Normal re-deployments use UPDATE, whose config keeps
-the production schedule at `*/10 * * * *`.
+PRE-FLIGHT is first-deploy only. Never run it against a Worker with live Cron. Its generated config writes triggers.crons = [], which removes every Cron Trigger on that Worker. RELEASE is the separate first-Cron-enable action after live read-only verification. Normal re-deployments use UPDATE, whose config keeps the production schedule at */10 * * * *.
 
 ### Why the bootstrap cannot use `wrangler versions upload`
 
@@ -69,17 +49,20 @@ decision or an external fact.
 
 Three distinct classes exist, and conflating them causes real deployment defects:
 
-| Class | Lives in | Set by | Examples |
-| --- | --- | --- | --- |
-| **Application runtime variables** | Generated Wrangler `vars` | GitHub **Variables** | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB` |
-| **Deployment-only values** | The resolver / workflow invocation | Repository Variables, `production` Environment Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN` |
-| **Worker Secrets** | Cloudflare Worker Secrets | `wrangler secret put` / Cloudflare secret UI | `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ADMIN_TOKEN` |
-| **Optional Cron monitor Worker Secret** | Cloudflare Worker Secret | `wrangler secret put` / Cloudflare secret UI | `MONITOR_READ_TOKEN` (owner-installed; not required by deploy validation) |
+| Class                                   | Lives in                           | Set by                                                                  | Examples                                                                  |
+| --------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Application runtime variables**       | Generated Wrangler `vars`          | GitHub **Variables**                                                    | `REGION_ID`, `ECS_INSTANCE_ID`, `TRAFFIC_THRESHOLD_GB`                    |
+| **Deployment-only values**              | The resolver / workflow invocation | Repository Variables, `production` Environment Secrets, dispatch inputs | `D1_DATABASE_ID`, `HTTP_EXPOSURE_MODE`, `CLOUDFLARE_API_TOKEN`            |
+| **Worker Secrets**                      | Cloudflare Worker Secrets          | `wrangler secret put` / Cloudflare secret UI                            | `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ADMIN_TOKEN`         |
+| **Optional Cron monitor Worker Secret** | Cloudflare Worker Secret           | `wrangler secret put` / Cloudflare secret UI                            | `MONITOR_READ_TOKEN` (owner-installed; not required by deploy validation) |
 
 The difference that matters: **application runtime variables configure how the
 Worker behaves and are not credentials**, so they belong in GitHub Variables, not
-Secrets. **Worker Secrets are credentials**, are attached on Cloudflare, and are
-never routed through GitHub.
+Secrets. **Worker Secrets are credentials and belong in Cloudflare, not plaintext
+vars.** The Alibaba and admin credentials are installed directly on the Worker.
+MONITOR_READ_TOKEN is intentionally held as a GitHub Actions secret and installed as
+a Worker Secret only by install-monitor-read-token.yml; that workflow pipes it over
+stdin and checks the secret name without printing its value.
 
 ### Deployment trust boundary
 
@@ -88,18 +71,24 @@ The owner must configure that Environment with **required reviewers enabled** an
 deployment branches/tags **restricted to `main` only**. These are mandatory
 security settings, not optional hardening.
 
+| Name                    | Kind   | Scope                        |
+| ----------------------- | ------ | ---------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | Secret | **`production` Environment** |
+| `CLOUDFLARE_ACCOUNT_ID` | Secret | **`production` Environment** |
+
 Store `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as **secrets on the
 `production` Environment**, not as repository secrets. Keep `REGION_ID`,
 `ECS_INSTANCE_ID`, `D1_DATABASE_ID`, and the optional application overrides as
 repository Variables; `WORKER_CUSTOM_DOMAIN` may also remain a repository
 Variable. `HTTP_EXPOSURE_MODE` remains an explicit RELEASE and UPDATE input.
 
-All workflows also reject refs other than `refs/heads/main` before checkout or
-privileged steps. **This workflow-level ref guard is supplementary.** Workflow code
-comes from the selected ref, so the authoritative boundary is the `production`
-Environment's required reviewer, main-only deployment branch restriction, and
-Environment-scoped Cloudflare credentials. Repository tests can check the workflow
-files and this runbook; they cannot prove the live Environment is configured.
+PRE-FLIGHT, RELEASE, and UPDATE reject refs other than refs/heads/main before
+checkout or privileged steps. This workflow-level ref guard is supplementary. The
+monitor-token installer has no explicit ref guard; like the deployment workflows,
+it relies on the protected production Environment's required reviewer, main-only
+deployment branch restriction, and Environment-scoped Cloudflare credentials.
+Workflow code comes from the selected ref, so the Environment boundary is
+authoritative. Repository tests cannot prove the live Environment is configured.
 
 ### 1b. Application runtime repository variables
 
@@ -109,23 +98,23 @@ generated artifact is authoritative, they must be present at generation time.
 **Required.** `loadConfig()` rejects a Worker whose environment lacks these, so a
 deployment that omitted them would succeed and then fail at the first request:
 
-| Variable | Requirement | Confirmed? |
-| --- | --- | --- |
-| `REGION_ID` | The ECS region. Used to build `ecs.<REGION_ID>.aliyuncs.com`. | ☐ |
-| `ECS_INSTANCE_ID` | **Exactly one** instance. The Worker manages no other. | ☐ |
+| Variable          | Requirement                                                   | Confirmed? |
+| ----------------- | ------------------------------------------------------------- | ---------- |
+| `REGION_ID`       | The ECS region. Used to build `ecs.<REGION_ID>.aliyuncs.com`. | ☐          |
+| `ECS_INSTANCE_ID` | **Exactly one** instance. The Worker manages no other.        | ☐          |
 
 **Optional overrides.** When the repository variable is unset or empty, the
 committed default in `wrangler.jsonc` is preserved — the repository stays the one
 place a default is stated:
 
-| Variable | Committed default | Notes |
-| --- | --- | --- |
-| `TRAFFIC_THRESHOLD_GB` | `180` | Threshold in console-aligned GB; calculated with a `1024^3` divisor. See §5. |
-| `CDT_ENDPOINT` | `cdt.aliyuncs.com` | **Unverified** (A1). Confirm at first run. |
-| `BUSINESS_REGION_ID` | *(absent)* | When unset, no CDT filter is applied. |
-| `SIGNATURE_VERSION` | `v3` | `v2` or `v3`. See §6 if the first run is rejected. |
-| `STOPPED_MODE` | `KeepCharging` | **Read §4 before changing.** |
-| `ENABLE_BILLING` | *(absent)* | Default-off. When set, the resolver passes its trimmed value through; only `1`, `true`, or `yes` (case-insensitive) enables read-only balance lookup. Production enablement requires a separate owner authorization for Alibaba RAM permission `bss:QueryAccountBalance` / BSS API `QueryAccountBalance` on `bssopenapi.aliyuncs.com` (**OWNER GATE**; do not apply IAM as part of this deployment wiring). Monthly spend is unavailable. |
+| Variable               | Committed default  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TRAFFIC_THRESHOLD_GB` | `180`              | Threshold in console-aligned GB; calculated with a `1024^3` divisor. See §5.                                                                                                                                                                                                                                                                                                                                                              |
+| `CDT_ENDPOINT`         | `cdt.aliyuncs.com` | **Unverified** (A1). Confirm at first run.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `BUSINESS_REGION_ID`   | _(absent)_         | When unset, no CDT filter is applied.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `SIGNATURE_VERSION`    | `v3`               | `v2` or `v3`. See §6 if the first run is rejected.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `STOPPED_MODE`         | `KeepCharging`     | **Read §4 before changing.**                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ENABLE_BILLING`       | _(absent)_         | Default-off. When set, the resolver passes its trimmed value through; only `1`, `true`, or `yes` (case-insensitive) enables read-only balance lookup. Production enablement requires a separate owner authorization for Alibaba RAM permission `bss:QueryAccountBalance` / BSS API `QueryAccountBalance` on `bssopenapi.aliyuncs.com` (**OWNER GATE**; do not apply IAM as part of this deployment wiring). Monthly spend is unavailable. |
 
 Together these are the SPEC §2.2 **application** variables. Deployment-only values
 (§3c) are a separate set and are never added to this table.
@@ -144,7 +133,7 @@ that config is removed during deploy. This is how a plaintext `ALIYUN_ACCESS_KEY
 binding can be wiped; use Worker Secrets instead.
 
 **Resolution happens in the resolver, not in the Worker.** The resolver's
-responsibility is *deployment completeness*: it fails before generating if a
+responsibility is _deployment completeness_: it fails before generating if a
 required variable is absent, and injects values deterministically. It deliberately
 does **not** re-implement runtime semantic validation — whether the threshold is a
 positive number or the signature version is `v2`/`v3` remains `loadConfig()`'s job,
@@ -152,25 +141,26 @@ so there is exactly one implementation of each rule.
 
 ### 1c. Worker Secrets — required and optional names, values never committed
 
-| Secret | Requirement | Confirmed? |
-| --- | --- | --- |
-| `ALIYUN_ACCESS_KEY_ID` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** From the RAM user in `docs/security/ram-policy.md`. | ☐ |
-| `ALIYUN_ACCESS_KEY_SECRET` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** Its paired secret. | ☐ |
-| `WEBHOOK_URL` | Optional. When set, must be absolute `https://` and enables one webhook attempt per scheduled run. | ☐ |
-| `WEBHOOK_TOKEN` | Optional with `WEBHOOK_URL`. When set, sent as `Authorization: Bearer <token>`; token alone is a config error. | ☐ |
-| `ADMIN_TOKEN` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE** for the dashboard/API. Absent ⇒ every protected route denies. | ☐ |
+| Secret                     | Requirement                                                                                                                        | Confirmed? |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `ALIYUN_ACCESS_KEY_ID`     | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** From the RAM user in `docs/security/ram-policy.md`.            | ☐          |
+| `ALIYUN_ACCESS_KEY_SECRET` | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE.** Its paired secret.                                             | ☐          |
+| `WEBHOOK_URL`              | Optional. When set, must be absolute `https://` and enables one webhook attempt per scheduled run.                                 | ☐          |
+| `WEBHOOK_TOKEN`            | Optional with `WEBHOOK_URL`. When set, sent as `Authorization: Bearer <token>`; token alone is a config error.                     | ☐          |
+| `ADMIN_TOKEN`              | **Required by PRE-FLIGHT's post-deploy gate, RELEASE, and UPDATE** for the dashboard/API. Absent ⇒ every protected route denies.   | ☐          |
+| `MONITOR_READ_TOKEN`       | Optional for deploy validation; required for the Cron telemetry probe. Dedicated Bearer credential, not an ADMIN_TOKEN substitute. | ☐          |
 
 ### External confirmations
 
-| Item | Confirmed? |
-| --- | --- |
-| The RAM policy grants **exactly four** actions and no wildcard action. | ☐ |
-| The instance's current state is known, and stopping it is acceptable. | ☐ |
-| If webhook reporting is configured, the endpoint is reachable and will record what it receives. | ☐ |
-| The Cloudflare account plan matches what §7 concludes. | ☐ |
-| A D1 database exists for the binding, or a decision to run without history is recorded. | ☐ |
-| The HTTP exposure decision has been made (see §3c), or a record exists of choosing none. | ☐ |
-| `REGION_ID` and `ECS_INSTANCE_ID` are set as repository **variables** (not secrets). | ☐ |
+| Item                                                                                            | Confirmed? |
+| ----------------------------------------------------------------------------------------------- | ---------- |
+| The RAM policy grants **exactly four** actions and no wildcard action.                          | ☐          |
+| The instance's current state is known, and stopping it is acceptable.                           | ☐          |
+| If webhook reporting is configured, the endpoint is reachable and will record what it receives. | ☐          |
+| The Cloudflare account plan matches what §7 concludes.                                          | ☐          |
+| A D1 database exists for the binding, or a decision to run without history is recorded.         | ☐          |
+| The HTTP exposure decision has been made (see §3c), or a record exists of choosing none.        | ☐          |
+| `REGION_ID` and `ECS_INSTANCE_ID` are set as repository **variables** (not secrets).            | ☐          |
 
 Set `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, and `ADMIN_TOKEN` as Worker
 Secrets. PRE-FLIGHT keeps `secrets.required: []` so the first deploy can create a
@@ -210,6 +200,12 @@ never copy the key value into an issue, log, chat, or repository file.
 > and deploys it immediately. That interacts with preflight verification — see
 > §3b step 2.
 
+### Installing or rotating the Cron monitor token
+
+Store the same dedicated value as the GitHub Actions secret MONITOR_READ_TOKEN and as the Worker Secret. Dispatch .github/workflows/install-monitor-read-token.yml with confirmation INSTALL. The protected production Environment supplies Cloudflare credentials; the workflow pipes the value to Wrangler stdin and verifies the secret name only.
+
+The secret write creates a Worker version but does not deploy application code. After the install workflow, run the authorized UPDATE workflow to deploy the intended application revision while preserving Cron. See [configuration](configuration.md#installing-or-rotating-monitor_read_token) for the full token handling rules.
+
 ## 3. Deploying
 
 There are six documented invocations: three owner-gated workflows (the normal
@@ -225,16 +221,16 @@ A remote deployment still needs the identifier. Rather than commit it or rewrite
 the committed config in CI, `scripts/resolve-deploy-config.mjs` reads
 `wrangler.jsonc` and writes a **generated** config:
 
-| Mode | Output | Purpose |
-| --- | --- | --- |
-| `--mode preflight` | `wrangler.preflight.jsonc` | First deploy only; Cron disabled; Version URL. |
-| `--mode release` | `wrangler.deploy.jsonc` | First Cron enable after live verification; chosen endpoint. |
-| `--mode update` | `wrangler.update.jsonc` | Existing Worker; production Cron and selected HTTP exposure retained. |
+| Mode               | Output                     | Purpose                                                               |
+| ------------------ | -------------------------- | --------------------------------------------------------------------- |
+| `--mode preflight` | `wrangler.preflight.jsonc` | First deploy only; Cron disabled; Version URL.                        |
+| `--mode release`   | `wrangler.deploy.jsonc`    | First Cron enable after live verification; chosen endpoint.           |
+| `--mode update`    | `wrangler.update.jsonc`    | Existing Worker; production Cron and selected HTTP exposure retained. |
 
 Three properties are enforced by the resolver, and each closes a measured defect:
 
 1. **The generated file is written to the repository root.** Wrangler treats the
-   config's *directory* as the project root, so a config written anywhere else
+   config's _directory_ as the project root, so a config written anywhere else
    makes `main: "src/index.ts"` resolve outside the repository and fail with
    "The entry-point file at `src/index.ts` was not found". The resolver refuses any
    other location.
@@ -251,15 +247,14 @@ It may not silently change the region, the instance, the threshold, the endpoint
 the business-region filter, the signature version, or the stopped mode.
 
 The workflow steps pass `--config` explicitly for the same reason: the dry-run in
-`npm run validate` uses `wrangler.jsonc`, and a validation against a *different*
+`npm run validate` uses `wrangler.jsonc`, and a validation against a _different_
 config proves nothing about the one being deployed.
 
 ### 3b. Initial bootstrap — PRE-FLIGHT, then RELEASE
 
 **Step 1 — PRE-FLIGHT** (creates the Worker, no Cron). Dispatch
-`.github/workflows/preflight.yml`. It resolves `--mode preflight`, applies remote
-migrations, and performs the first `wrangler deploy`.
-
+.github/workflows/preflight.yml; its workflow_dispatch has no inputs. It resolves
+mode preflight, applies remote migrations, and performs the first Wrangler deploy.
 PRE-FLIGHT is for a new Worker only. The preflight config sets `preview_urls =
 true`, `workers_dev = false`, no route, and `triggers.crons = []`.
 
@@ -275,8 +270,8 @@ operation as "have no schedule".
 
 **Why the preflight config also omits `secrets.required`.** Wrangler validates
 `secrets.required` at deploy time, and a Worker that does not exist yet cannot hold
-secrets — it refuses with *"This Worker does not exist yet, so secrets cannot be
-set in advance with `wrangler secret put`."* So a first deploy that declared
+secrets — it refuses with _"This Worker does not exist yet, so secrets cannot be
+set in advance with `wrangler secret put`."_ So a first deploy that declared
 `secrets.required` could never succeed. The preflight config therefore declares
 `required: []`, and **RELEASE and UPDATE require exactly the two Alibaba credentials and
 `ADMIN_TOKEN`**, where the Worker exists and the fail-loudly-on-a-missing-secret
@@ -316,7 +311,7 @@ perform the live read-only check against the newest Version URL after secret rep
 > versions, because they all descend from the preflight config that declares
 > `triggers.crons = []`. What changes is which version URL you point the checks at.
 
-Configure the three required Worker Secrets for a *useful* live verification —
+Configure the three required Worker Secrets for a _useful_ live verification —
 without the Alibaba credentials and `ADMIN_TOKEN`, `loadConfig()` or HTTP
 authentication fails and `/api/query` cannot return anything:
 
@@ -341,16 +336,16 @@ first-enable action; subsequent application deployments use UPDATE.
 ### 3c. Deployment-only configuration (owner action, one time)
 
 These are **not** Worker runtime variables and **not** Worker Secrets. They
-configure *how the deployment is performed*, and they are not in the SPEC §2.2
+configure _how the deployment is performed_, and they are not in the SPEC §2.2
 seven. See §1a for how the three classes differ.
 
-| Name | Kind | Scope | Purpose |
-| --- | --- | --- | --- |
-| `D1_DATABASE_ID` | Variable | **Repository** | The remote `TRAFFIC_DB` UUID. |
-| `HTTP_EXPOSURE_MODE` | Dispatch input | — | `workers_dev` or `custom_domain`. **No default.** |
-| `WORKER_CUSTOM_DOMAIN` | Variable | **Repository** | Required only when the mode is `custom_domain`. |
-| `CLOUDFLARE_API_TOKEN` | Secret | **`production` Environment** | Scoped to Workers + D1. |
-| `CLOUDFLARE_ACCOUNT_ID` | Secret | **`production` Environment** | The account identifier. |
+| Name                    | Kind           | Scope                        | Purpose                                           |
+| ----------------------- | -------------- | ---------------------------- | ------------------------------------------------- |
+| `D1_DATABASE_ID`        | Variable       | **Repository**               | The remote `TRAFFIC_DB` UUID.                     |
+| `HTTP_EXPOSURE_MODE`    | Dispatch input | —                            | `workers_dev` or `custom_domain`. **No default.** |
+| `WORKER_CUSTOM_DOMAIN`  | Variable       | **Repository**               | Required only when the mode is `custom_domain`.   |
+| `CLOUDFLARE_API_TOKEN`  | Secret         | **`production` Environment** | Scoped to Workers + D1.                           |
+| `CLOUDFLARE_ACCOUNT_ID` | Secret         | **`production` Environment** | The account identifier.                           |
 
 `D1_DATABASE_ID` and the application/runtime values must remain repository-level
 Variables. Cloudflare deployment credentials must be Environment-level Secrets so
@@ -384,10 +379,10 @@ runtime overrides in repository Variables.
 and no routes, so the production dashboard/API has **no stable inbound endpoint**
 until the owner chooses one. That choice is explicit, and there is no default:
 
-| Mode | Generated config | When to use |
-| --- | --- | --- |
-| `workers_dev` | `workers_dev = true`, no route | The simpler personal/hobby path. |
-| `custom_domain` | `workers_dev = false` + a `custom_domain` route | A domain you control. |
+| Mode            | Generated config                                | When to use                      |
+| --------------- | ----------------------------------------------- | -------------------------------- |
+| `workers_dev`   | `workers_dev = true`, no route                  | The simpler personal/hobby path. |
+| `custom_domain` | `workers_dev = false` + a `custom_domain` route | A domain you control.            |
 
 For `custom_domain`, set `WORKER_CUSTOM_DOMAIN` to a bare hostname (for example
 `worker.example.com`). The resolver fails closed — producing no config at all — when
@@ -395,7 +390,7 @@ the mode is absent, unrecognised, or `custom_domain` without a domain, and when 
 domain is malformed.
 
 Protected routes remain authenticated in **both** modes. Choosing a public hostname
-does not make a route public; it makes the *address* predictable. `GET /health` is
+does not make a route public; it makes the _address_ predictable. `GET /health` is
 the only public route in either mode.
 
 ### 3d. RELEASE gates
@@ -421,11 +416,11 @@ Worker has been created and RELEASE has enabled its Cron. The workflow targets t
 protected `production` Environment, rejects non-`main` refs, and requires these
 dispatch inputs with no defaults:
 
-| Input | Required value | Owner confirms |
-| --- | --- | --- |
-| `confirmation` | `UPDATE` | This is an intentional production update. |
-| `EXISTING_WORKER_CONFIRMED` | `YES` | The Worker exists and Cron `*/10 * * * *` is already live. |
-| `HTTP_EXPOSURE_MODE` | `workers_dev` or `custom_domain` | The HTTP exposure to retain. For `custom_domain`, `WORKER_CUSTOM_DOMAIN` must be a valid hostname. |
+| Input                       | Required value                   | Owner confirms                                                                                     |
+| --------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `confirmation`              | `UPDATE`                         | This is an intentional production update.                                                          |
+| `EXISTING_WORKER_CONFIRMED` | `YES`                            | The Worker exists and Cron `*/10 * * * *` is already live.                                         |
+| `HTTP_EXPOSURE_MODE`        | `workers_dev` or `custom_domain` | The HTTP exposure to retain. For `custom_domain`, `WORKER_CUSTOM_DOMAIN` must be a valid hostname. |
 
 UPDATE does not require `LIVE_READ_ONLY_VERIFIED`; that gate belongs to the
 first-deployment RELEASE. It resolves `--mode update` into
@@ -577,7 +572,7 @@ Cron remains absent and there is no way for the system to act.
 
 Most assumptions in the register fail safe: if they are wrong, the run aborts and
 nothing mutates. **R4 is the exception.** If the traffic-unit assumption is wrong,
-the system does not fail — it computes a *valid but incorrect* comparison and may
+the system does not fail — it computes a _valid but incorrect_ comparison and may
 act on it. The fail-closed design cannot detect this, because nothing failed.
 
 So the traffic figure must be checked empirically **before** scheduled authority
@@ -638,31 +633,33 @@ make it act.
 
 ## 7. Cloudflare plan requirement
 
+The measurement below is a historical first-natural-Cron observation, not a claim that the same SHA or Worker version is currently live. The current recorded production evidence is in the dated [governance snapshot](../release/v0.1.0-documentation-governance.md). Verify the live Worker Version in Cloudflare and the latest UPDATE run before deployment decisions.
+
 **Required plan: Workers Free.** The first natural production Cron measured
 `cpuTimeMs` **9**, which is within the Workers Free **10 ms** CPU allowance.
 Paid / Standard Usage Model is not required solely by this measurement. The gate
 used is this single natural Cron observation.
 
-| Field | Value |
-| --- | --- |
-| RELEASE run | [36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416) (PASS) |
-| RELEASE SHA | `106f4d214a883ac9bfdf0798110f845092fbe971` |
-| Custom domain | `cdt.q9m3.com` |
-| Cron | `*/10 * * * *` (count 1) |
-| First natural Cron | `2026-09-25T16:50:28Z` |
-| Outcome | success / ok; action `none-running` |
-| D1 history write | yes |
-| Webhook | `webhook_attempted=false` |
-| `cpuTimeMs` | **9** (Workers Free 10 ms CPU, within limit) |
+| Field                      | Value                                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RELEASE run                | [36159977416](https://github.com/Skyline-Gazer/CFWorker4AliCDT/actions/runs/36159977416) (PASS)                                                          |
+| Current production version | See the dated [governance evidence snapshot](../release/v0.1.0-documentation-governance.md); verify the live Worker Version in Cloudflare before acting. |
+| Custom domain              | `cdt.q9m3.com`                                                                                                                                           |
+| Cron                       | `*/10 * * * *` (count 1)                                                                                                                                 |
+| First natural Cron         | `2026-09-25T16:50:28Z`                                                                                                                                   |
+| Outcome                    | success / ok; action `none-running`                                                                                                                      |
+| D1 history write           | yes                                                                                                                                                      |
+| Webhook                    | `webhook_attempted=false`                                                                                                                                |
+| `cpuTimeMs`                | **9** (Workers Free 10 ms CPU, within limit)                                                                                                             |
 
 Workers Free applies its 10 ms CPU allowance automatically. Do not configure a
 custom `limits.cpu_ms` in `wrangler.jsonc` or either generated deploy config:
 Cloudflare rejects custom CPU limits on Free with error **100328**.
 
-| Account model | Platform Cron CPU allowance (< 1 hour interval) | Deployment rule |
-| --- | --- | --- |
-| Workers Free | **10 ms**, applied automatically | Omit custom `limits.cpu_ms`. This is the required plan. |
-| Workers Paid / Standard Usage Model | 30 s | Not required by the measurement above. A later move, and any custom CPU limit, still requires measured evidence and an explicit owner choice. |
+| Account model                       | Platform Cron CPU allowance (< 1 hour interval) | Deployment rule                                                                                                                               |
+| ----------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workers Free                        | **10 ms**, applied automatically                | Omit custom `limits.cpu_ms`. This is the required plan.                                                                                       |
+| Workers Paid / Standard Usage Model | 30 s                                            | Not required by the measurement above. A later move, and any custom CPU limit, still requires measured evidence and an explicit owner choice. |
 
 Network waiting — the CDT call, the ECS call, the D1 write, the webhook — does
 **not** consume CPU. What does is JSON parsing, redaction, and rendering.
@@ -698,7 +695,7 @@ nothing, which is why the figure is recorded rather than assumed.
 
 ## 9. References
 
-PLAN §14 (deployment model), §11 (risks), Q4/Q5 (resolved). SPEC §2
+[Configuration](configuration.md), [monitoring](monitoring.md), [API](api.md), [security invariants](../security/invariants.md). PLAN §14 (deployment model), §11 (risks), Q4/Q5 (resolved). SPEC §2
 (configuration), §6.4 (stop semantics), §8 (HTTP surface), §9 (D1), §11 (runtime
 constraints). `docs/security/ram-policy.md`, `docs/operations/assumptions-register.md`.
 Cloudflare: [Deployment

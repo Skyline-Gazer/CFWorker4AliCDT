@@ -1,5 +1,8 @@
 # OWNER AUTHORIZATION — PRE-FLIGHT/RELEASE VERIFICATION PACKET
 
+> Historical verification and authorization packet. Its revision and verification state are point-in-time evidence; see current API and deployment guides for present behavior.
+
+
 **Packet scope:** documentation for owner review only. It does not dispatch a
 workflow, contact a production account, or authorize a deployment.
 

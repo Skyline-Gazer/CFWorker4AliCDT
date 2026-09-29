@@ -1,5 +1,8 @@
 # CFWorker4AliCDT — Project Specification
 
+> Normative design specification, preserved as a historical baseline. If runtime behavior differs, inspect current source, tests, and operator guides.
+
+
 > Status: **REVISION 3 — companion to [project-plan.md](./project-plan.md).**
 > Supersedes Revision 1. Normative language: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 > Where this SPEC and the PLAN disagree, the SPEC governs behaviour.
