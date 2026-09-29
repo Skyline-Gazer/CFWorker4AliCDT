@@ -18,6 +18,8 @@ export default tseslint.config(
       // authoritative). It is covered by execution tests instead: it is asserted
       // to exit non-zero without `D1_DATABASE_ID` and to inject the id with it.
       "scripts/*.mjs",
+      "scripts/**/*.mjs",
+      "scripts/**/*.d.mts",
     ],
   },
   js.configs.recommended,

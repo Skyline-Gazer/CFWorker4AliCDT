@@ -1,5 +1,12 @@
 # Deployment and operations
 
+## Production HTTP health monitoring
+
+The scheduled, read-only public HTTP health probe and its incident behavior are
+documented in [Production HTTP health monitoring](production-health.md). Its
+`/health` result does not establish Cron or ECS health; Cron health remains
+`UNKNOWN` until secure telemetry is separately authorized.
+
 Deployment is **manual and owner-gated**. No CI job deploys, and no scheduled ECS
 mutation occurs without explicit owner authorization.
 
