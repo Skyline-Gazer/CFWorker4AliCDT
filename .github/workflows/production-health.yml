@@ -1,0 +1,54 @@
+name: Production HTTP health
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: production-health
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    name: Probe production HTTP health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Probe HTTP health
+        id: probe
+        run: node scripts/production-health/run-probe.mjs
+        env:
+          PROBE_URL: ${{ vars.PRODUCTION_HEALTH_URL || 'https://cdt.q9m3.com/health' }}
+          PROBE_TIMEOUT_MS: "10000"
+          PROBE_MAX_ATTEMPTS: "3"
+          PROBE_BACKOFF_MS: "500"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Create, update, or close incident
+        if: always()
+        run: node scripts/production-health/handle-incident.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload health result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-health-result
+          path: production-health-result.json
+          if-no-files-found: error
+          retention-days: 30
