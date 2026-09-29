@@ -4,6 +4,8 @@ The Worker requires **exactly four** Alibaba Cloud actions. This document specif
 the policy, states what it deliberately excludes, and gives the procedure for
 issuing the credential without ever committing a value.
 
+For the Worker control, HTTP, and secret boundaries, see [security invariants](invariants.md). MONITOR_READ_TOKEN is a separate Worker credential for the read-only Cron telemetry route; it grants no Alibaba Cloud permissions and is not part of this RAM policy.
+
 > **No credential, account ID, instance ID, or secret appears in this repository.**
 > Values are supplied only through Wrangler secrets. Nothing here is a placeholder
 > that could be mistaken for a real value.
@@ -53,7 +55,7 @@ two calls whose scope cannot be narrowed safely in advance:
   per-instance resource to name, and the operation is undocumented (see the
   assumptions register), so constraining its resource shape would be guessing at
   an unverified contract. If the constraint were wrong the call would be denied
-  and the Worker would fail closed — so the blast radius of `*` here is *reading*
+  and the Worker would fail closed — so the blast radius of `*` here is _reading_
   traffic for the account, which is the operation's entire purpose.
 - **`DescribeInstances`** is a list operation. `DescribeInstances` with a
   resource-scoped ARN is what the `InstanceIds` parameter already achieves at
@@ -64,14 +66,14 @@ ones whose blast radius matters.
 
 ## 3. What is deliberately excluded
 
-| Excluded | Why |
-| --- | --- |
-| `ecs:*`, `cdt:*`, or `*` | The Worker exercises exactly four actions. Granting more is authority it never uses, which is pure blast radius and fails the least-privilege requirement. |
-| `ecs:RebootInstance` | **Explicit anti-requirement.** Community implementations rebooting an instance on an unrecognised status is a documented failure this project exists to avoid. |
-| `ecs:StopInstances` / `ecs:StartInstances` (plural) | The batch forms operate on sets. The Worker manages exactly one instance. |
-| `ecs:ModifyInstanceAttribute`, `DeleteInstance`, disk or snapshot actions | Destructive, and not needed to enforce a traffic threshold. |
-| RAM, STS, billing, or account actions | The Worker never administers the account. |
-| Any `cdt:*` write or service-activation action (`OpenCdtService`, `SwitchToCdt`, …) | Activation is an operator decision, not a runtime one. |
+| Excluded                                                                            | Why                                                                                                                                                            |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ecs:*`, `cdt:*`, or `*`                                                            | The Worker exercises exactly four actions. Granting more is authority it never uses, which is pure blast radius and fails the least-privilege requirement.     |
+| `ecs:RebootInstance`                                                                | **Explicit anti-requirement.** Community implementations rebooting an instance on an unrecognised status is a documented failure this project exists to avoid. |
+| `ecs:StopInstances` / `ecs:StartInstances` (plural)                                 | The batch forms operate on sets. The Worker manages exactly one instance.                                                                                      |
+| `ecs:ModifyInstanceAttribute`, `DeleteInstance`, disk or snapshot actions           | Destructive, and not needed to enforce a traffic threshold.                                                                                                    |
+| RAM, STS, billing, or account actions                                               | The Worker never administers the account.                                                                                                                      |
+| Any `cdt:*` write or service-activation action (`OpenCdtService`, `SwitchToCdt`, …) | Activation is an operator decision, not a runtime one.                                                                                                         |
 
 If a future change appears to need a fifth action, that is an architectural
 change requiring owner approval — not a reason to widen this policy.

@@ -2,7 +2,7 @@
 
 ## CDT-Monitor upstream and donor provenance
 
-The planned P7 Web Console UI is derived from the Workers port
+The imported P7 Web Console UI derives from the Workers port
 [`kfqkfy/cdt-monitor-worker`](https://github.com/kfqkfy/cdt-monitor-worker/tree/75e6962d46791c517d4489227b6f0cf0c5c6a208)
 at commit `75e6962d46791c517d4489227b6f0cf0c5c6a208`. That repository's README
 describes it as a Workers port of

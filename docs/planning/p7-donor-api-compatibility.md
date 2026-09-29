@@ -1,5 +1,8 @@
 # P7 donor API compatibility matrix
 
+> Historical donor compatibility snapshot. The current supported route and action contract is in [the API guide](../operations/api.md).
+
+
 This inventory maps the actual `fetch('?action=...')` calls in the donor's
 [`static/index.html` at the pinned commit](https://github.com/kfqkfy/cdt-monitor-worker/blob/75e6962d46791c517d4489227b6f0cf0c5c6a208/static/index.html)
 to the current CFWorker4AliCDT HTTP and storage contracts. The call locations

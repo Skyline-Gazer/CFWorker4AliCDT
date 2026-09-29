@@ -1,5 +1,8 @@
 # Final risk and acceptance review
 
+> Historical risk review. Its acceptance and deployment status are a point-in-time record, not a statement of current production state.
+
+
 This is the closing review required by PLAN §19 and SPEC §13. It verifies that every
 current PLAN risk is mitigated or documented, and that every current SPEC acceptance
 criterion is demonstrated by **executable evidence** rather than intent.

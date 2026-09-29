@@ -1,5 +1,8 @@
 # OWNER DECISION — `save_config` and monthly billing
 
+> Historical owner decision record. It preserves the approved decisions; current runtime availability and gates are documented in the operator guides.
+
+
 **Status:** Decision/history. Issue #128 Option C and Issue #129 Option C are
 approved and their donor-facing UX/contracts are implemented. This document
 **does not** authorize production enablement, IAM expansion, or

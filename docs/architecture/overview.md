@@ -130,10 +130,11 @@ specification at a glance, and the type system checks exhaustiveness.
 Boundary: `trafficGB < thresholdGB` ⇒ running; `>=` ⇒ **stopped**. Exactly at the
 threshold stops.
 
-Invalid input — non-finite, negative, or zero traffic or threshold — returns
-`fail-safe` with no mutation. `NaN` is called out explicitly, because `NaN >= x` and
-`NaN < x` are both false, so a naive comparison falls through to whichever branch was
-written last.
+Invalid decision input — such as non-finite or negative traffic, or a non-finite or
+non-positive threshold — returns a fail-safe result with no mutation. A valid
+explicit zero-traffic reading is allowed; an unavailable or empty CDT response is
+an error, not a zero reading. Exactly-zero traffic and unknown traffic are different
+facts.
 
 ## Data flow and authority
 

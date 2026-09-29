@@ -1,5 +1,8 @@
 # P7 CLOSEOUT — PRODUCTION UPDATE SETTLEMENT
 
+> Historical production update packet. SHA, Worker version, and action state in this packet describe its recorded event only; see the dated governance evidence snapshot for the audited v0.1.0 baseline.
+
+
 **Scope:** Closeout record for the existing-Worker UPDATE path for
 Skyline-Gazer/CFWorker4AliCDT. The production UPDATE completed successfully;
 this document records the verified deployment and post-UPDATE observation.

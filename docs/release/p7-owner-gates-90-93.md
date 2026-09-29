@@ -1,5 +1,8 @@
 # OWNER DECISION PACKET — P7 gates #90–#93
 
+> Deferred owner decision packet. Issues #90–#93 remain open and inactive; this packet does not authorize implementation or production activation.
+
+
 **Status:** Decision packets only. **No production activation** of multi-account,
 manual Start/Stop, daily schedule, or keep-alive. Cron remains the sole ECS
 mutation authority until an explicit, separate owner authorization changes that
